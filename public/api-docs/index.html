@@ -149,4 +149,19 @@
 <li>Need help? Open a support ticket in the bot and include the order ID.</li>
 </ul>
 <p class="mut">ToolsByDcx Reseller API · Docs served from <code>/api-docs</code></p>
-</div></body></html>
+</div>
+<script>
+document.querySelectorAll('.docs pre').forEach(function(pre){
+  var b=document.createElement('button');
+  b.className='copy-btn';b.type='button';b.textContent='⧉ Copy';
+  b.addEventListener('click',function(){
+    var t=(pre.querySelector('code')||pre).innerText;
+    function done(){b.textContent='✓ Copied';setTimeout(function(){b.textContent='⧉ Copy';},1800);}
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(done,function(){fallback();});}
+    else fallback();
+    function fallback(){var ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');done();}catch(e){}document.body.removeChild(ta);}
+  });
+  pre.appendChild(b);
+});
+</script>
+</body></html>
