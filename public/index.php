@@ -88,4 +88,8 @@ function filterProducts(q){q=q.toLowerCase();document.querySelectorAll('.shop-ca
 <a href="admin/">Admin Panel</a> · <a href="api-docs/">Reseller API Docs</a><?php if ($tgLink): ?> · <a href="<?= esc($tgLink) ?>">Telegram Bot</a><?php endif; ?><br><br>
 <?= esc($botName) ?> · Pay via Binance Pay — Auto Delivery
 </footer>
+<button class="back-to-top" id="toTop" title="Back to top" aria-label="Back to top">↑</button>
+<script>
+(function(){var b=document.getElementById('toTop');if(!b)return;window.addEventListener('scroll',function(){b.classList.toggle('show',window.scrollY>300);},{passive:true});b.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'});});})();
+</script>
 </div></body></html>
