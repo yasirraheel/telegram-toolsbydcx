@@ -31,6 +31,21 @@ function tg_edit(string $token, int $chatId, int $msgId, string $text, $markup =
     if ($markup) $p['reply_markup'] = json_encode($markup);
     return tg_api($token, 'editMessageText', $p);
 }
+function tg_edit_caption(string $token, int $chatId, int $msgId, string $caption, $markup = null): array {
+    // Media messages (animation/photo) have a caption but no text, so
+    // editMessageText fails on them — editMessageCaption is the only way.
+    // Captions are limited to 1024 chars: if the new caption is longer,
+    // replace the message with a plain text message so nothing is cut off
+    // (delivery credentials must never be truncated).
+    if (mb_strlen($caption) > 1024) {
+        tg_api($token, 'deleteMessage', ['chat_id' => $chatId, 'message_id' => $msgId]);
+        return tg_send($token, $chatId, $caption, $markup);
+    }
+    $p = ['chat_id' => $chatId, 'message_id' => $msgId, 'caption' => $caption,
+          'parse_mode' => 'HTML'];
+    if ($markup) $p['reply_markup'] = json_encode($markup);
+    return tg_api($token, 'editMessageCaption', $p);
+}
 function tg_answer(string $token, string $cbId, ?string $text = null): array {
     $p = ['callback_query_id' => $cbId];
     if ($text) $p['text'] = $text;

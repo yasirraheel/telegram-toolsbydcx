@@ -402,18 +402,29 @@ class Bot {
         $parts = explode(':', $data);
         $cmd = $parts[0];
 
-        // Edit-in-place helper
-        $edit = fn(string $txt, $kb = null) => tg_edit($this->token, $this->chatId, $msgId, $txt, $kb);
+        // The welcome menu lives on the animated banner (a media message), which
+        // has a caption but no text: editMessageText fails on it, so use
+        // editMessageCaption for media messages and editMessageText otherwise.
+        $isMedia = isset($cb['message']['animation']) || isset($cb['message']['photo'])
+            || isset($cb['message']['video']) || isset($cb['message']['caption']);
+        $edit = fn(string $txt, $kb = null) => $isMedia
+            ? tg_edit_caption($this->token, $this->chatId, $msgId, $txt, $kb)
+            : tg_edit($this->token, $this->chatId, $msgId, $txt, $kb);
 
         switch ($cmd) {
             case 'm':
                 $screen = $parts[1] ?? 'home';
-                if ($screen === 'home') { $this->sendWelcome(); return; }
+                if ($screen === 'home') {
+                    // Edit the banner back to the welcome screen in place instead
+                    // of sending a new banner every time (avoids message pile-up).
+                    $edit($this->i->t('welcome_caption', ['user_id' => $this->user['telegram_id']]), $this->mainMenuKb());
+                    return;
+                }
                 $this->editScreen($edit, $screen);
                 return;
             case 'cat': $this->showCategory($edit, (int)$parts[1], (int)($parts[2] ?? 1)); return;
             case 'p': $this->showProduct($edit, (int)$parts[1]); return;
-            case 'buy': $this->showConfirm((int)$parts[1], 1, $msgId); return;
+            case 'buy': $this->showConfirm((int)$parts[1], 1, $msgId, $isMedia); return;
             case 'buym':
                 $this->setState('await_qty:' . (int)$parts[1]);
                 tg_send($this->token, $this->chatId, '🔢 Enter the quantity you want to buy (1-100):');
@@ -568,7 +579,7 @@ class Bot {
         $edit($txt, $kb);
     }
 
-    private function showConfirm(int $pid, int $qty, ?int $msgId = null): void {
+    private function showConfirm(int $pid, int $qty, ?int $msgId = null, bool $isMedia = false): void {
         $p = $this->product($pid);
         if (!$p) return;
         $total = (float)$p['price_usd'] * $qty;
@@ -583,7 +594,10 @@ class Bot {
             [btn('💰 USDT (TON)', 'cf:' . $pid . ':' . $qty . ':ton'), btn('⭐ Telegram Stars', 'cf:' . $pid . ':' . $qty . ':stars')],
             [btn($this->i->t('btn_back'), 'p:' . $pid)],
         ]);
-        if ($msgId) tg_edit($this->token, $this->chatId, $msgId, $txt, $kb);
+        if ($msgId) {
+            if ($isMedia) tg_edit_caption($this->token, $this->chatId, $msgId, $txt, $kb);
+            else tg_edit($this->token, $this->chatId, $msgId, $txt, $kb);
+        }
         else tg_send($this->token, $this->chatId, $txt, $kb);
     }
 

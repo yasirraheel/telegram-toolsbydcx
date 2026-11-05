@@ -42,7 +42,10 @@ $cb = fn(int $id, string $data) => [
     'callback_query' => [
         'id' => 'cb' . $id, 'data' => $data,
         'from' => ['id' => 111222333, 'first_name' => 'Test', 'username' => 'tester'],
-        'message' => ['message_id' => 50, 'chat' => ['id' => 111222333, 'type' => 'private']],
+        // Real menu buttons live on the animated welcome banner: a media
+        // message with a caption, so callbacks must use editMessageCaption.
+        'message' => ['message_id' => 50, 'chat' => ['id' => 111222333, 'type' => 'private'],
+            'animation' => ['file_id' => 'banner'], 'caption' => 'welcome'],
     ],
 ];
 
