@@ -46,7 +46,7 @@ function admin_head(string $title, string $page, int $botId, array $bots): void 
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= esc($title) ?> — ToolsByDcx Admin</title>
-<link rel="stylesheet" href="../assets/site.css?v=3"></head>
+<link rel="stylesheet" href="../assets/site.css?v=4"></head>
 <body><div class="wrap">
 <nav class="side" id="sidebar"><h1><a href="index.php?page=dashboard" title="Dashboard">🛒 Tools<span>ByDcx</span></a></h1>
 <?php foreach ($nav as $group => $links): ?>

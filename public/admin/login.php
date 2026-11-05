@@ -19,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Login — ToolsByDcx Admin</title>
-<link rel="stylesheet" href="../assets/site.css?v=3"></head><body class="login-wrap">
+<link rel="stylesheet" href="../assets/site.css?v=4"></head><body class="login-wrap">
 <div class="box"><h1><a href="../" title="Home" style="color:#1f2937;text-decoration:none">🛒 Tools<span style="color:#ff6622">ByDcx</span> Admin</a></h1><p class="mut">Sign in to manage your Telegram store bots.</p>
 <?php foreach (take_flash() as $f): ?><div class="flash"><?= esc($f['msg']) ?></div><?php endforeach; ?>
 <form method="post" action="index.php?page=login">
