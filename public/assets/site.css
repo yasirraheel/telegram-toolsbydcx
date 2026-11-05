@@ -181,8 +181,8 @@ h2.cat{margin:30px 0 12px;font-size:20px;border-bottom:1px solid var(--line);pad
 .cta-banner .btn:hover{background:#fff1e8}
 
 /* ---------- Back to top ---------- */
-.back-to-top{position:fixed;right:20px;bottom:20px;width:46px;height:46px;border-radius:50%;background:var(--acc);color:#fff;border:0;cursor:pointer;font-size:20px;box-shadow:0 4px 14px rgba(0,0,0,.18);opacity:0;pointer-events:none;transition:opacity .25s ease,transform .25s ease;z-index:50;display:flex;align-items:center;justify-content:center}
-.back-to-top.show{opacity:1;pointer-events:auto}
+.back-to-top{position:fixed;right:22px;bottom:22px;width:50px;height:50px;border-radius:50%;background:var(--acc);color:#fff;border:0;cursor:pointer;font-size:22px;font-weight:700;box-shadow:0 6px 18px rgba(255,102,34,.45);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .25s ease,transform .25s ease,visibility .25s;z-index:9999;display:flex;align-items:center;justify-content:center}
+.back-to-top.show{opacity:1;visibility:visible;pointer-events:auto}
 .back-to-top:hover{background:var(--acc-d);transform:translateY(-2px)}
 
 /* ---------- Responsive / mobile friendly ---------- */

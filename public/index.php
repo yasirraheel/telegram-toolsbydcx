@@ -58,7 +58,7 @@ if ($botId) {
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= esc($botName) ?> — Telegram Store</title>
-<link rel="stylesheet" href="assets/site.css"></head>
+<link rel="stylesheet" href="assets/site.css?v=3"></head>
 <body><div class="store">
 <header>
 <a class="logo" href="/" title="Home">🛒 Tools<span>ByDcx</span></a>
@@ -156,6 +156,6 @@ function filterProducts(q){q=q.toLowerCase();document.querySelectorAll('.shop-ca
 </footer>
 <button class="back-to-top" id="toTop" title="Back to top" aria-label="Back to top">↑</button>
 <script>
-(function(){var b=document.getElementById('toTop');if(!b)return;window.addEventListener('scroll',function(){b.classList.toggle('show',window.scrollY>300);},{passive:true});b.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'});});})();
+(function(){var b=document.getElementById('toTop');if(!b)return;window.addEventListener('scroll',function(){b.classList.toggle('show',window.scrollY>120);},{passive:true});b.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'});});})();
 </script>
 </div></body></html>
