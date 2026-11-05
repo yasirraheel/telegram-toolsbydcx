@@ -101,7 +101,7 @@ tbody tr:hover{background:#fafafa}
 pre{background:#f9fafb;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;white-space:pre-wrap;word-break:break-word}
 </style></head>
 <body><div class="wrap">
-<nav class="side"><h1>🛒 Tools<span>ByDcx</span></h1>
+<nav class="side" id="sidebar"><h1>🛒 Tools<span>ByDcx</span></h1>
 <?php foreach ($nav as $group => $links): ?>
 <h4><?= esc($group) ?></h4>
 <?php foreach ($links as $k => $label): ?>
@@ -136,5 +136,5 @@ function filterNav(q){q=q.toLowerCase();document.querySelectorAll('.side a[data-
 }
 
 function admin_foot(): void {
-    echo '</main></div></body></html>';
+    echo '<script>(function(){var s=document.getElementById("sidebar");if(!s)return;var k="tdcx-side-scroll";try{var y=sessionStorage.getItem(k);if(y!==null)s.scrollTop=parseInt(y,10)||0;}catch(e){}s.addEventListener("scroll",function(){try{sessionStorage.setItem(k,String(s.scrollTop));}catch(e){}},{passive:true});var on=s.querySelector("a.on");if(on){var r=on.getBoundingClientRect(),sr=s.getBoundingClientRect();if(r.top<sr.top||r.bottom>sr.bottom){on.scrollIntoView({block:"nearest"});}}})();</script></main></div></body></html>';
 }
