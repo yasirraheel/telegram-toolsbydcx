@@ -31,6 +31,23 @@ $byCat = [];
 foreach ($products as $p) $byCat[(int)$p['category_id']][] = $p;
 $catName = [];
 foreach ($cats as $c) $catName[(int)$c['id']] = $c;
+
+$totalUsers = 0;
+$avgRating = 0;
+$reviewCount = 0;
+$reviews = [];
+if ($botId) {
+    $totalUsers = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE bot_id=$botId")->fetchColumn();
+    $avgRating = (float)$pdo->query("SELECT COALESCE(AVG(rating),0) FROM reviews WHERE bot_id=$botId AND status='approved'")->fetchColumn();
+    $reviewCount = (int)$pdo->query("SELECT COUNT(*) FROM reviews WHERE bot_id=$botId AND status='approved'")->fetchColumn();
+    $st = $pdo->prepare(
+        "SELECT r.rating, r.comment, p.name AS product_name, u.username
+           FROM reviews r JOIN products p ON p.id=r.product_id JOIN users u ON u.id=r.user_id
+          WHERE r.bot_id=? AND r.status='approved' ORDER BY r.created_at DESC LIMIT 6"
+    );
+    $st->execute([$botId]);
+    $reviews = $st->fetchAll();
+}
 ?>
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -43,16 +60,39 @@ foreach ($cats as $c) $catName[(int)$c['id']] = $c;
 <nav class="nav"><a href="admin/">Admin Panel</a><a href="api-docs/">Reseller API</a><?php if ($tgLink): ?><a href="<?= esc($tgLink) ?>">Telegram Bot ↗</a><?php endif; ?></nav>
 </header>
 
-<div class="hero">
-<img src="assets/banner.gif" alt="ToolsByDcx" onerror="this.style.display='none'">
-<h1>Automated digital marketplace</h1>
-<p>AI productivity tools, creative studio software, and online learning. Shop inside Telegram, instant auto delivery.</p>
-<?php if ($tgLink): ?><a class="btn btn-green" href="<?= esc($tgLink) ?>">Open in Telegram ↗</a><?php else: ?><p class="empty">The Telegram bot is being connected. Check back soon.</p><?php endif; ?>
-<div class="row" style="justify-content:center;margin:20px 0 6px">
+<div class="hero-split">
+<div class="hero-text">
+<h1>AI tools, accounts &amp; credits.<br><span class="grad-text">Instantly delivered.</span></h1>
+<p class="lead">ChatGPT, Claude, Netflix, Spotify aur 170+ premium products, aik hi jagah. Telegram bot kholo, buy karo, seconds me delivery pao.</p>
+<div class="hero-cta">
+<?php if ($tgLink): ?><a class="btn btn-green" href="<?= esc($tgLink) ?>">Open in Telegram ↗</a><?php else: ?><span class="badge warn">Bot is being connected…</span><?php endif; ?>
+<a class="btn btn2" href="#all">Browse products ↓</a>
+</div>
+<div class="trust-row">
+<span>⚡ Instant auto delivery</span>
+<span>🔒 Secure crypto &amp; points payments</span>
+<span>🛡️ Warranty on every order</span>
+</div>
+<div class="row" style="margin:20px 0 6px">
 <div class="stat"><b><?= (int)$totalProducts ?></b><span>Products</span></div>
 <div class="stat"><b><?= count($cats) ?></b><span>Categories</span></div>
+<?php if ($totalUsers > 0): ?><div class="stat"><b><?= (int)$totalUsers ?></b><span>Users</span></div><?php endif; ?>
+<?php if ($reviewCount > 0): ?><div class="stat"><b><?= esc(number_format($avgRating, 1)) ?> ★</b><span><?= (int)$reviewCount ?> reviews</span></div><?php endif; ?>
 <div class="stat"><b>$1 = 10 pts</b><span>Points rate</span></div>
 </div>
+</div>
+<div class="hero-art">
+<img src="assets/banner.gif" alt="ToolsByDcx" onerror="this.style.display='none'">
+<div class="float-card c1">⚡ Instant delivery<small>Average under 1 minute</small></div>
+<div class="float-card c2">💎 <?= (int)$totalProducts ?> products<small>Across <?= count($cats) ?> categories</small></div>
+</div>
+</div>
+
+<h2 class="cat" style="margin-top:34px">How it works</h2>
+<div class="steps">
+<div class="step"><div class="num">1</div><h3>Open the bot</h3><p>Telegram par <?= esc($botName) ?> bot kholo aur Shop Now par tap karo.</p></div>
+<div class="step"><div class="num">2</div><h3>Buy with points or crypto</h3><p>Points, Binance Pay, USDT ya Telegram Stars se pay karo, 15 minute payment window.</p></div>
+<div class="step"><div class="num">3</div><h3>Get it instantly</h3><p>Payment confirm hote hi account ya code chat me auto deliver ho jata hai.</p></div>
 </div>
 
 <?php if ($totalProducts): ?>
@@ -82,6 +122,27 @@ function filterProducts(q){q=q.toLowerCase();document.querySelectorAll('.shop-ca
 </script>
 <?php else: ?>
 <p class="empty">No products listed yet. Products added in the admin panel will appear here automatically.</p>
+<?php endif; ?>
+
+<?php if ($reviews): ?>
+<h2 class="cat">What buyers say</h2>
+<div class="steps">
+<?php foreach ($reviews as $r): ?>
+<div class="review-card">
+<div class="stars"><?= str_repeat('★', max(1, min(5, (int)$r['rating']))) ?><?= str_repeat('☆', 5 - max(1, min(5, (int)$r['rating']))) ?></div>
+<p><?= esc($r['comment'] !== '' ? $r['comment'] : 'Great product, instant delivery.') ?></p>
+<div class="who">@<?= esc($r['username'] ?: 'buyer') ?> · <?= esc($r['product_name']) ?></div>
+</div>
+<?php endforeach; ?>
+</div>
+<?php endif; ?>
+
+<?php if ($tgLink): ?>
+<div class="cta-banner">
+<h2>Ready to shop?</h2>
+<p>Open the bot and grab your favourite tool in under a minute.</p>
+<a class="btn" href="<?= esc($tgLink) ?>">Open <?= esc($botName) ?> in Telegram ↗</a>
+</div>
 <?php endif; ?>
 
 <footer>
