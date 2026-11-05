@@ -19,18 +19,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Login — ToolsByDcx Admin</title>
-<style>
-body{margin:0;background:#f4f5f7;color:#1f2937;font:15px/1.5 system-ui,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center}
-.box{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:28px;width:340px;box-shadow:0 4px 16px rgba(0,0,0,.06)}
-h1{margin:0 0 4px;font-size:20px}.mut{color:#6b7280;font-size:13px;margin:0 0 16px}
-label{display:block;font-size:12px;color:#6b7280;margin:12px 0 4px;font-weight:600}
-input{width:100%;background:#fff;border:1px solid #d1d5db;color:#1f2937;border-radius:8px;padding:9px 10px;font:inherit;box-sizing:border-box}
-input:focus{outline:2px solid #fff1e8;border-color:#ff6622}
-button{width:100%;margin-top:18px;background:#ff6622;color:#fff;border:0;border-radius:8px;padding:10px;font:inherit;cursor:pointer;font-weight:600}
-button:hover{background:#e6551a}
-.flash{padding:10px;border-radius:8px;background:#fee2e2;color:#991b1b;margin-bottom:10px;font-weight:600}
-</style></head><body>
-<div class="box"><h1>🛒 Tools<span style="color:#ff6622">ByDcx</span> Admin</h1><p class="mut">Sign in to manage your Telegram store bots.</p>
+<link rel="stylesheet" href="../assets/site.css"></head><body class="login-wrap">
+<div class="box"><h1><a href="../" title="Home" style="color:#1f2937;text-decoration:none">🛒 Tools<span style="color:#ff6622">ByDcx</span> Admin</a></h1><p class="mut">Sign in to manage your Telegram store bots.</p>
 <?php foreach (take_flash() as $f): ?><div class="flash"><?= esc($f['msg']) ?></div><?php endforeach; ?>
 <form method="post" action="index.php?page=login">
 <label>Username</label><input type="text" name="username" required autofocus>

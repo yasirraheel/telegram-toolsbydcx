@@ -1,3 +1,4 @@
+DirectoryIndex index.php index.html
 RewriteEngine On
 # Reseller API pretty URLs: /api/products -> /api/index.php?route=products
 RewriteCond %{REQUEST_FILENAME} !-f
