@@ -64,8 +64,34 @@ run_case('Price list', $cb(10, 'm:price'), $handler);
 run_case('Loyalty screen', $cb(11, 'm:loyal'), $handler);
 run_case('Freebies', $msg(12, '/freebies'), $handler);
 run_case('How to Use', $msg(13, '/help'), $handler);
-
+// --- audit fixes (2026-11-06) ---
+run_case('Reply keyboard Menu tap (was: fatal Illegal offset type)', $msg(14, '🏠 Menu'), $handler);
+run_case('Balance command (tracked screen, no new banner)', $msg(15, '/balance'), $handler);
+run_case('Reply keyboard How to Use tap', $msg(16, '📖 How to Use'), $handler);
+run_case('Favorites toast (was: fake message)', $cb(17, 'fav:1'), $handler);
+run_case('Product reviews (was: user dashboard)', $cb(18, 'rev:1'), $handler);
+run_case('Copy payment address (typed, order)', $cb(19, 'copy:o:1'), $handler);
+run_case('Check payment (typed, order)', $cb(20, 'pc:o:1'), $handler);
+// Stars deposit success: seed a pending deposit, then the payment update
 $pdo = db();
+$u = $pdo->query("SELECT id FROM users WHERE bot_id=1 AND telegram_id=111222333")->fetch();
+db()->prepare("INSERT INTO deposits (bot_id, user_id, amount_usd, points, method, status) VALUES (1, ?, 5, 50, 'stars', 'pending')")->execute([$u['id']]);
+$did = (int)$pdo->lastInsertId();
+run_case('Stars deposit success (was: ignored, no points)', [
+    'update_id' => 21,
+    'message' => [
+        'message_id' => 21, 'date' => time(),
+        'chat' => ['id' => 111222333, 'type' => 'private'],
+        'from' => ['id' => 111222333, 'first_name' => 'Test', 'username' => 'tester'],
+        'successful_payment' => [
+            'invoice_payload' => 'deposit:' . $did,
+            'telegram_payment_charge_id' => 'test-charge-1',
+        ],
+    ],
+], $handler);
+$dep = $pdo->query("SELECT status FROM deposits WHERE id=$did")->fetch();
+echo "DB check — deposit #{$did} status=" . ($dep['status'] ?? '-') . " (want confirmed)\n";
+
 $u = $pdo->query("SELECT points_wallet, total_orders, total_spent FROM users WHERE bot_id=1 AND telegram_id=111222333")->fetch();
 $o = $pdo->query("SELECT id, status, total_usd FROM orders WHERE bot_id=1 ORDER BY id DESC LIMIT 1")->fetch();
 echo "DB check — user points_wallet={$u['points_wallet']} orders={$u['total_orders']} spent={$u['total_spent']}\n";

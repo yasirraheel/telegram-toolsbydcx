@@ -54,6 +54,12 @@ class Bot {
         $this->i->setLang($this->user['language']);
     }
     private function setState(string $state, array $data = []): void {
+        // Preserve the tracked menu message across state changes: the
+        // state machine must never wipe the screen tracking.
+        $cur = $this->stateData();
+        foreach (['menu_msg_id', 'menu_media', 'kb_sent'] as $k) {
+            if (!array_key_exists($k, $data) && array_key_exists($k, $cur)) $data[$k] = $cur[$k];
+        }
         db()->prepare("UPDATE users SET state=?, state_data=? WHERE id=?")
             ->execute([$state, json_encode($data), $this->user['id']]);
         $this->user['state'] = $state;
@@ -61,6 +67,48 @@ class Bot {
     }
     private function stateData(): array {
         return json_decode($this->user['state_data'] ?? '{}', true) ?: [];
+    }
+
+    // ---------- tracked menu message ----------
+    // The id (+ media flag) of the user's current screen message, kept in
+    // users.state_data so navigation can EDIT it in place instead of
+    // stacking fresh messages below. No schema change needed.
+    private function menuMsg(): array {
+        $d = $this->stateData();
+        return ['id' => (int)($d['menu_msg_id'] ?? 0), 'media' => !empty($d['menu_media'])];
+    }
+    private function menuTrack(int $id, bool $media): void {
+        $d = $this->stateData();
+        $d['menu_msg_id'] = $id;
+        $d['menu_media'] = $media ? 1 : 0;
+        db()->prepare("UPDATE users SET state_data=? WHERE id=?")
+            ->execute([json_encode($d), $this->user['id']]);
+        $this->user['state_data'] = json_encode($d);
+    }
+    private function kbSent(): bool { return !empty($this->stateData()['kb_sent']); }
+    private function markKbSent(): void {
+        $d = $this->stateData();
+        $d['kb_sent'] = 1;
+        db()->prepare("UPDATE users SET state_data=? WHERE id=?")
+            ->execute([json_encode($d), $this->user['id']]);
+        $this->user['state_data'] = json_encode($d);
+    }
+    // Show a text screen on the tracked menu message when possible,
+    // otherwise as a fresh message (which then becomes the tracked one).
+    private function showTracked(string $text, $kb): void {
+        $m = $this->menuMsg();
+        if ($m['id'] > 0) {
+            $res = $m['media']
+                ? tg_edit_caption($this->token, $this->chatId, $m['id'], $text, $kb)
+                : tg_edit($this->token, $this->chatId, $m['id'], $text, $kb);
+            if ($res['ok'] ?? false) {
+                $this->menuTrack((int)($res['result']['message_id'] ?? $m['id']), !empty($res['_fallback_text']) ? false : $m['media']);
+                return;
+            }
+            if (str_contains((string)($res['description'] ?? ''), 'message is not modified')) return;
+        }
+        $res = tg_send($this->token, $this->chatId, $text, $kb);
+        if ($res['ok'] ?? false) $this->menuTrack((int)$res['result']['message_id'], false);
     }
 
     // ---------- keyboards ----------
@@ -84,8 +132,12 @@ class Bot {
             [btn_kb($i->t('btn_freebies'), 'success'), btn_kb($i->t('btn_howto'), 'primary')],
         ]);
     }
+    // Button colours copied from the original bot (Bot API 9.4 styles):
+    // primary = blue, success = green, danger = red. Grids alternate
+    // blue/green so no button is left in Telegram's default dark style.
+    private function altStyle(int $i): string { return $i % 2 === 0 ? 'primary' : 'success'; }
     private function backHomeKb(): array {
-        return inline_kb([[btn($this->i->t('btn_back'), 'm:home'), btn($this->i->t('btn_home'), 'm:home')]]);
+        return inline_kb([[btn($this->i->t('btn_back'), 'm:home', 'primary'), btn($this->i->t('btn_home'), 'm:home', 'success')]]);
     }
 
     // ---------- messages ----------
@@ -118,15 +170,17 @@ class Bot {
             };
             return;
         }
-        // Reply keyboard (match translated text and English fallback)
+        // Reply keyboard (match translated text and English fallback).
+        // NOTE: arrays cannot be array keys in PHP — the map is a list of
+        // [labels, action] pairs, not an associative array.
         $en = new I18n((int)$this->bot['id'], 'en');
         $map = [
-            [$this->i->t('btn_menu'), $en->t('btn_menu')] => 'welcome',
-            [$this->i->t('btn_api'), $en->t('btn_api')] => 'api',
-            [$this->i->t('btn_freebies'), $en->t('btn_freebies')] => 'freebies',
-            [$this->i->t('btn_howto'), $en->t('btn_howto')] => 'howto',
+            [[$this->i->t('btn_menu'), $en->t('btn_menu')], 'welcome'],
+            [[$this->i->t('btn_api'), $en->t('btn_api')], 'api'],
+            [[$this->i->t('btn_freebies'), $en->t('btn_freebies')], 'freebies'],
+            [[$this->i->t('btn_howto'), $en->t('btn_howto')], 'howto'],
         ];
-        foreach ($map as $labels => $action) {
+        foreach ($map as [$labels, $action]) {
             if (in_array($text, $labels, true)) {
                 match ($action) {
                     'welcome' => $this->sendWelcome(),
@@ -168,18 +222,38 @@ class Bot {
     }
 
     private function sendWelcome(): void {
-        $cfg = load_config();
+        // Edit the tracked menu message in place when it is the banner, so
+        // repeated Menu / /start taps never stack fresh banners below.
+        // Only send a fresh banner when there is no tracked message or it
+        // can no longer be edited (deleted / too old).
+        $m = $this->menuMsg();
         $caption = $this->i->t('welcome_caption', ['user_id' => $this->user['telegram_id']]);
+        if ($m['id'] > 0 && $m['media']) {
+            $res = tg_edit_caption($this->token, $this->chatId, $m['id'], $caption, $this->mainMenuKb());
+            if ($res['ok'] ?? false) {
+                $this->menuTrack((int)($res['result']['message_id'] ?? $m['id']), !empty($res['_fallback_text']) ? false : true);
+                return;
+            }
+            if (str_contains((string)($res['description'] ?? ''), 'message is not modified')) return;
+        }
+        if ($m['id'] > 0) {
+            tg_api($this->token, 'deleteMessage', ['chat_id' => $this->chatId, 'message_id' => $m['id']]);
+        }
+        $cfg = load_config();
         $base = rtrim($cfg['base_url'], '/');
         // Animated GIF banner when present (like the original), else static PNG.
         $gifOnDisk = dirname(__DIR__) . '/public/assets/banner.gif';
         if (is_file($gifOnDisk)) {
-            tg_animation($this->token, $this->chatId, $base . '/assets/banner.gif', $caption, $this->mainMenuKb());
+            $res = tg_animation($this->token, $this->chatId, $base . '/assets/banner.gif', $caption, $this->mainMenuKb());
         } else {
-            tg_photo($this->token, $this->chatId, $base . '/assets/banner.png', $caption, $this->mainMenuKb());
+            $res = tg_photo($this->token, $this->chatId, $base . '/assets/banner.png', $caption, $this->mainMenuKb());
         }
-        // Re-send reply keyboard via a small text message if needed (photo already carries inline kb)
-        tg_send($this->token, $this->chatId, '👇 ' . $this->i->t('btn_menu'), $this->replyKb());
+        if ($res['ok'] ?? false) $this->menuTrack((int)$res['result']['message_id'], true);
+        // The persistent reply keyboard only needs sending once ever.
+        if (!$this->kbSent()) {
+            tg_send($this->token, $this->chatId, '👇 ' . $this->i->t('btn_menu'), $this->replyKb());
+            $this->markKbSent();
+        }
     }
 
     // ---------- state machine ----------
@@ -236,6 +310,9 @@ class Bot {
         if (str_starts_with($state, 'await_warranty:')) {
             $oid = (int)substr($state, 15);
             $type = $data['type'] ?? 'warranty';
+            $own = db()->prepare("SELECT 1 FROM orders WHERE id=? AND bot_id=? AND user_id=?");
+            $own->execute([$oid, $this->bot['id'], $this->user['id']]);
+            if (!$own->fetch()) { $this->setState(''); tg_send($this->token, $this->chatId, '❌ Order not found.'); return true; }
             db()->prepare("INSERT INTO warranty_claims (bot_id, order_id, user_id, type, reason) VALUES (?,?,?,?,?)")
                 ->execute([$this->bot['id'], $oid, $this->user['id'], $type, $text]);
             $this->setState('');
@@ -252,10 +329,17 @@ class Bot {
             return true;
         }
         if (str_starts_with($state, 'await_txid:')) {
-            $oid = (int)substr($state, 11);
-            db()->prepare("UPDATE orders SET txid=? WHERE id=? AND bot_id=?")->execute([$text, $oid, $this->bot['id']]);
+            // Typed: await_txid:o:<order id> or await_txid:d:<deposit id>.
+            $p = explode(':', $state);
+            $type = $p[1] ?? 'o';
+            $oid = (int)($p[2] ?? 0);
+            if ($type === 'd') {
+                db()->prepare("UPDATE deposits SET txid=? WHERE id=? AND bot_id=?")->execute([$text, $oid, $this->bot['id']]);
+            } else {
+                db()->prepare("UPDATE orders SET txid=? WHERE id=? AND bot_id=?")->execute([$text, $oid, $this->bot['id']]);
+            }
             $this->setState('');
-            tg_send($this->token, $this->chatId, "✅ TXID recorded for order #{$oid}. An admin will verify your payment shortly.");
+            tg_send($this->token, $this->chatId, "✅ TXID recorded for #{$oid}. An admin will verify your payment shortly.");
             return true;
         }
         return false;
@@ -289,14 +373,14 @@ class Bot {
         $st->execute([$this->bot['id'], $u['id']]);
         $refs = (int)$st->fetch()['c'];
         $txt = $this->i->t('account_title', [
-            'name' => $u['first_name'], 'username' => $u['username'] ?: '—',
+            'name' => esc($u['first_name']), 'username' => esc($u['username']) ?: '—',
             'user_id' => $u['telegram_id'], 'joined' => substr($u['joined_at'], 0, 10),
             'points' => fmt_points($points), 'wallet' => fmt_points($u['points_wallet']),
             'referral' => fmt_points($u['points_referral']),
             'balance' => fmt_usd($points / (float)setting($this->bot['id'], 'points_rate', 10)),
             'referrals' => $refs, 'status' => 'Active',
         ]);
-        tg_send($this->token, $this->chatId, $txt, $this->backHomeKb());
+        $this->showTracked($txt, $this->backHomeKb());
     }
 
     private function showPoints(): void {
@@ -304,50 +388,53 @@ class Bot {
         $rate = setting($this->bot['id'], 'points_rate', 10);
         $txt = $this->i->t('points_title', ['points' => fmt_points($points), 'rate' => $rate]);
         $kb = inline_kb([
-            [btn('$1', 'pp:1'), btn('$5', 'pp:5'), btn('$10', 'pp:10'), btn('$25', 'pp:25')],
-            [btn('✏️ Custom Amount', 'pp:custom')],
-            [btn($this->i->t('btn_back'), 'm:home')],
+            [btn('$1', 'pp:1', 'primary'), btn('$5', 'pp:5', 'success'), btn('$10', 'pp:10', 'primary'), btn('$25', 'pp:25', 'success')],
+            [btn('✏️ Custom Amount', 'pp:custom', 'primary')],
+            [btn($this->i->t('btn_back'), 'm:home', 'primary')],
         ]);
-        tg_send($this->token, $this->chatId, $txt, $kb);
+        $this->showTracked($txt, $kb);
     }
 
-    private function showDepositMethods(float $usd): void {
+    private function showDepositMethods(float $usd, $edit = null): void {
         $kb = inline_kb([
-            [btn('Binance Auto Pay', 'dp:binance:' . $usd), btn('USDT (BEP20)', 'dp:bep20:' . $usd)],
-            [btn('USDT (Solana)', 'dp:sol:' . $usd), btn('USDT (TON)', 'dp:ton:' . $usd)],
-            [btn('⭐ Telegram Stars', 'dp:stars:' . $usd)],
-            [btn($this->i->t('btn_back'), 'm:points')],
+            [btn('Binance Auto Pay', 'dp:binance:' . $usd, 'primary'), btn('USDT (BEP20)', 'dp:bep20:' . $usd, 'success')],
+            [btn('USDT (Solana)', 'dp:sol:' . $usd, 'primary'), btn('USDT (TON)', 'dp:ton:' . $usd, 'success')],
+            [btn('⭐ Telegram Stars', 'dp:stars:' . $usd, 'primary')],
+            [btn($this->i->t('btn_back'), 'm:points', 'primary')],
         ]);
-        tg_send($this->token, $this->chatId,
-            "💰 Deposit \${$usd} (" . fmt_points(points_for($this->bot['id'], $usd)) . " points)\n\nSelect payment method:", $kb);
+        $txt = "💰 Deposit \${$usd} (" . fmt_points(points_for($this->bot['id'], $usd)) . " points)\n\nSelect payment method:";
+        if ($edit) $edit($txt, $kb);
+        else $this->showTracked($txt, $kb);
     }
 
     private function showFreebies(): void {
         $st = db()->prepare("SELECT * FROM freebies WHERE bot_id=? AND active=1 ORDER BY sort ASC");
         $st->execute([$this->bot['id']]);
         $rows = [];
-        foreach ($st->fetchAll() as $f) $rows[] = [btn($f['title'], 'free:' . $f['id'])];
-        $rows[] = [btn($this->i->t('btn_back'), 'm:home')];
-        tg_send($this->token, $this->chatId, $this->i->t('freebies_title'), inline_kb($rows));
+        $i = 0;
+        foreach ($st->fetchAll() as $f) $rows[] = [btn($f['title'], 'free:' . $f['id'], $this->altStyle($i++))];
+        $rows[] = [btn($this->i->t('btn_back'), 'm:home', 'primary')];
+        $this->showTracked($this->i->t('freebies_title'), inline_kb($rows));
     }
 
     private function showApi(): void {
         $cfg = load_config();
         $kb = inline_kb([
-            [btn('🔑 Generate API Key', 'api:gen')],
-            [btn_url('📄 API Documentation', rtrim($cfg['base_url'], '/') . '/api-docs')],
-            [btn($this->i->t('btn_home'), 'm:home')],
+            [btn('🔑 Generate API Key', 'api:gen', 'primary')],
+            [btn_url('📄 API Documentation', rtrim($cfg['base_url'], '/') . '/api-docs', 'success')],
+            [btn($this->i->t('btn_home'), 'm:home', 'primary')],
         ]);
-        tg_send($this->token, $this->chatId, $this->i->t('api_title'), $kb);
+        $this->showTracked($this->i->t('api_title'), $kb);
     }
 
     private function showLanguage(): void {
         $st = db()->prepare("SELECT * FROM languages WHERE bot_id=? AND active=1 ORDER BY sort ASC");
         $st->execute([$this->bot['id']]);
         $rows = [];
-        foreach ($st->fetchAll() as $l) $rows[] = [btn($l['name'] . ' — ' . $l['native_name'], 'lang:' . $l['code'])];
-        $rows[] = [btn($this->i->t('btn_back'), 'm:home')];
-        tg_send($this->token, $this->chatId, $this->i->t('language_title'), inline_kb($rows));
+        $i = 0;
+        foreach ($st->fetchAll() as $l) $rows[] = [btn($l['name'] . ' — ' . $l['native_name'], 'lang:' . $l['code'], $this->altStyle($i++))];
+        $rows[] = [btn($this->i->t('btn_back'), 'm:home', 'primary')];
+        $this->showTracked($this->i->t('language_title'), inline_kb($rows));
     }
 
     private function showSupport(): void {
@@ -356,17 +443,18 @@ class Bot {
         $r = $st->fetch();
         $txt = $this->i->t('support_title', ['total' => (int)$r['c'], 'open' => (int)$r['o']]);
         $kb = inline_kb([
-            [btn('✉️ New Ticket', 'tic:new'), btn('📋 My Tickets', 'tic:list')],
-            [btn($this->i->t('btn_back'), 'm:home')],
+            [btn('✉️ New Ticket', 'tic:new', 'primary'), btn('📋 My Tickets', 'tic:list', 'success')],
+            [btn($this->i->t('btn_back'), 'm:home', 'primary')],
         ]);
-        tg_send($this->token, $this->chatId, $txt, $kb);
+        $this->showTracked($txt, $kb);
     }
 
     private function showHowTo(): void {
         $rows = [];
-        foreach (howto_topics() as $k => $t) $rows[] = [btn($t['title'], 'how:' . $k)];
-        $rows[] = [btn($this->i->t('btn_back'), 'm:home')];
-        tg_send($this->token, $this->chatId, $this->i->t('howto_title'), inline_kb($rows));
+        $i = 0;
+        foreach (howto_topics() as $k => $t) $rows[] = [btn($t['title'], 'how:' . $k, $this->altStyle($i++))];
+        $rows[] = [btn($this->i->t('btn_back'), 'm:home', 'primary')];
+        $this->showTracked($this->i->t('howto_title'), inline_kb($rows));
     }
 
     private function showOrders(string $filter, int $page): void {
@@ -382,14 +470,14 @@ class Bot {
         $st = $pdo->prepare("SELECT o.*, p.name pname FROM orders o JOIN products p ON p.id=o.product_id WHERE $where ORDER BY o.created_at DESC LIMIT 10 OFFSET $off");
         $st->execute($params);
         foreach ($st->fetchAll() as $o) {
-            $txt .= "\n\n#{$o['id']} — {$o['pname']} ×{$o['qty']} — \${$o['total_usd']} — {$o['status']}";
+            $txt .= "\n\n#{$o['id']} — " . esc($o['pname']) . " ×{$o['qty']} — \${$o['total_usd']} — {$o['status']}";
         }
         $kb = inline_kb([
-            [btn('✅ Delivered', 'ord:delivered:1'), btn('⏳ Pending', 'ord:pending:1')],
-            [btn('↩️ Refunded', 'ord:refunded:1'), btn('❌ Cancelled', 'ord:cancelled:1')],
-            [btn('📋 All', 'ord:all:1'), btn($this->i->t('btn_back'), 'm:home')],
+            [btn('✅ Delivered', 'ord:delivered:1', 'primary'), btn('⏳ Pending', 'ord:pending:1', 'success')],
+            [btn('↩️ Refunded', 'ord:refunded:1', 'primary'), btn('❌ Cancelled', 'ord:cancelled:1', 'success')],
+            [btn('📋 All', 'ord:all:1', 'primary'), btn($this->i->t('btn_back'), 'm:home', 'primary')],
         ]);
-        tg_send($this->token, $this->chatId, $txt, $kb);
+        $this->showTracked($txt, $kb);
     }
 
     // ---------- callbacks ----------
@@ -398,43 +486,66 @@ class Bot {
         $this->getUser($cb['from']);
         $data = $cb['data'] ?? '';
         $msgId = (int)$cb['message']['message_id'];
-        tg_answer($this->token, $cb['id']);
         $parts = explode(':', $data);
         $cmd = $parts[0];
+
+        // Favorites has no list behind it yet: acknowledge with a toast
+        // instead of a fake confirmation message (and never double-answer
+        // a callback query — Telegram rejects the second answer).
+        if ($cmd === 'fav') {
+            tg_answer($this->token, $cb['id'], '❤️ Added to favorites.');
+            return;
+        }
+        tg_answer($this->token, $cb['id']);
 
         // The welcome menu lives on the animated banner (a media message), which
         // has a caption but no text: editMessageText fails on it, so use
         // editMessageCaption for media messages and editMessageText otherwise.
+        // The result is checked: a failed edit falls back to a fresh message
+        // so the button never silently dies, and tracking follows the
+        // message that actually ends up on screen.
         $isMedia = isset($cb['message']['animation']) || isset($cb['message']['photo'])
             || isset($cb['message']['video']) || isset($cb['message']['caption']);
-        $edit = fn(string $txt, $kb = null) => $isMedia
-            ? tg_edit_caption($this->token, $this->chatId, $msgId, $txt, $kb)
-            : tg_edit($this->token, $this->chatId, $msgId, $txt, $kb);
+        $edit = function (string $txt, $kb = null) use ($msgId, $isMedia): void {
+            $res = $isMedia
+                ? tg_edit_caption($this->token, $this->chatId, $msgId, $txt, $kb)
+                : tg_edit($this->token, $this->chatId, $msgId, $txt, $kb);
+            if ($res['ok'] ?? false) {
+                $this->menuTrack((int)($res['result']['message_id'] ?? $msgId), !empty($res['_fallback_text']) ? false : $isMedia);
+                return;
+            }
+            if (str_contains((string)($res['description'] ?? ''), 'message is not modified')) {
+                $this->menuTrack($msgId, $isMedia);
+                return;
+            }
+            // Edit failed (message deleted / too old): replace it.
+            tg_api($this->token, 'deleteMessage', ['chat_id' => $this->chatId, 'message_id' => $msgId]);
+            $r2 = tg_send($this->token, $this->chatId, $txt, $kb);
+            if ($r2['ok'] ?? false) $this->menuTrack((int)$r2['result']['message_id'], false);
+        };
 
         switch ($cmd) {
             case 'm':
                 $screen = $parts[1] ?? 'home';
                 if ($screen === 'home') {
-                    // Edit the banner back to the welcome screen in place instead
-                    // of sending a new banner every time (avoids message pile-up).
-                    $edit($this->i->t('welcome_caption', ['user_id' => $this->user['telegram_id']]), $this->mainMenuKb());
+                    if ($isMedia) {
+                        // Edit the banner back to the welcome screen in place.
+                        $edit($this->i->t('welcome_caption', ['user_id' => $this->user['telegram_id']]), $this->mainMenuKb());
+                    } else {
+                        // Text screen: remove it and bring the banner back.
+                        tg_api($this->token, 'deleteMessage', ['chat_id' => $this->chatId, 'message_id' => $msgId]);
+                        $this->sendWelcome();
+                    }
                     return;
                 }
                 $this->editScreen($edit, $screen);
                 return;
             case 'cat': $this->showCategory($edit, (int)$parts[1], (int)($parts[2] ?? 1)); return;
             case 'p': $this->showProduct($edit, (int)$parts[1]); return;
-            case 'buy': $this->showConfirm((int)$parts[1], 1, $msgId, $isMedia); return;
+            case 'buy': $this->showConfirm((int)$parts[1], 1, $edit); return;
             case 'buym':
                 $this->setState('await_qty:' . (int)$parts[1]);
                 tg_send($this->token, $this->chatId, '🔢 Enter the quantity you want to buy (1-100):');
-                return;
-            case 'fav':
-                tg_send($this->token, $this->chatId, '❤️ Added to favorites.');
-                return;
-            case 'share':
-                $p = $this->product((int)$parts[1]);
-                if ($p) tg_send($this->token, $this->chatId, '📦 ' . $p['name'] . ' — $' . fmt_usd($p['price_usd']) . ' on ' . $this->bot['name'] . '!');
                 return;
             case 'cf': $this->confirmPurchase($edit, (int)$parts[1], (int)$parts[2], $parts[3] ?? 'points'); return;
             case 'pp':
@@ -442,16 +553,17 @@ class Bot {
                     $this->setState('await_custom_points');
                     tg_send($this->token, $this->chatId, '✏️ Enter a custom deposit amount in USD ($1 minimum):');
                 } else {
-                    $this->showDepositMethods((float)$parts[1]);
+                    $this->showDepositMethods((float)$parts[1], $edit);
                 }
                 return;
+            case 'copy': $this->copyPaymentAddress($edit, $parts[1] ?? '', (int)($parts[2] ?? 0)); return;
             case 'dp': $this->startDeposit($edit, $parts[1], (float)$parts[2]); return;
             case 'ps':
-                $this->setState('await_txid:' . (int)$parts[1]);
-                tg_send($this->token, $this->chatId, '📋 Please paste your transaction ID (TXID) for order #' . (int)$parts[1] . ':');
+                $this->setState('await_txid:' . ($parts[1] ?? 'o') . ':' . (int)($parts[2] ?? 0));
+                tg_send($this->token, $this->chatId, '📋 Please paste your transaction ID (TXID) for #' . (int)($parts[2] ?? 0) . ':');
                 return;
-            case 'pc': $this->checkPayment($edit, (int)$parts[1]); return;
-            case 'px': $this->cancelOrder($edit, (int)$parts[1]); return;
+            case 'pc': $this->checkPayment($edit, $parts[1] ?? 'o', (int)($parts[2] ?? 0)); return;
+            case 'px': $this->cancelOrder($edit, $parts[1] ?? 'o', (int)($parts[2] ?? 0)); return;
             case 'ord': $this->showOrdersCb($edit, $parts[1], (int)($parts[2] ?? 1)); return;
             case 'o': $this->showOrderDetail($edit, (int)$parts[1]); return;
             case 'tic':
@@ -465,7 +577,11 @@ class Bot {
                 $this->setState('await_warranty:' . (int)$parts[2], ['type' => $parts[1]]);
                 tg_send($this->token, $this->chatId, '🛡️ Describe the problem with order #' . (int)$parts[2] . ':');
                 return;
-            case 'rev': $this->showReviews($edit); return;
+            case 'rev':
+                $pid = (int)($parts[1] ?? 0);
+                if ($pid > 0) $this->showProductReviews($edit, $pid);
+                else $this->showReviews($edit);
+                return;
             case 'revrate':
                 $this->setState('await_review:' . (int)$parts[2], ['rating' => (int)$parts[1]]);
                 tg_send($this->token, $this->chatId, '⭐ You rated ' . (int)$parts[1] . '/5. Now write your review text:');
@@ -477,7 +593,8 @@ class Bot {
             case 'lang':
                 db()->prepare("UPDATE users SET language=? WHERE id=?")->execute([$parts[1], $this->user['id']]);
                 $this->i->setLang($parts[1]);
-                $edit('✅ Language updated to ' . $parts[1] . '.', $this->backHomeKb());
+                // Show the welcome screen in the new language.
+                $this->sendWelcome();
                 return;
             case 'how': $this->showHowTopic($edit, $parts[1]); return;
             case 'pg': $this->showPriceList($edit, $parts[1] ?? 'all', (int)($parts[2] ?? 1)); return;
@@ -504,8 +621,9 @@ class Bot {
 
     private function showHowToCb(callable $edit): void {
         $rows = [];
-        foreach (howto_topics() as $k => $t) $rows[] = [btn($t['title'], 'how:' . $k)];
-        $rows[] = [btn($this->i->t('btn_back'), 'm:home')];
+        $i = 0;
+        foreach (howto_topics() as $k => $t) $rows[] = [btn($t['title'], 'how:' . $k, $this->altStyle($i++))];
+        $rows[] = [btn($this->i->t('btn_back'), 'm:home', 'primary')];
         $edit($this->i->t('howto_title'), inline_kb($rows));
     }
 
@@ -514,13 +632,14 @@ class Bot {
         $st->execute([$this->bot['id']]);
         $rows = [];
         $row = [];
+        $i = 0;
         foreach ($st->fetchAll() as $c) {
-            $row[] = btn($c['emoji'] . ' ' . $c['name'], 'cat:' . $c['id'] . ':1');
+            $row[] = btn($c['emoji'] . ' ' . $c['name'], 'cat:' . $c['id'] . ':1', $this->altStyle($i++));
             if (count($row) === 2) { $rows[] = $row; $row = []; }
         }
         if ($row) $rows[] = $row;
-        $rows[] = [btn($this->i->t('shop_classic'), 'pg:all:1'), btn($this->i->t('btn_points'), 'm:points')];
-        $rows[] = [btn($this->i->t('btn_back'), 'm:home')];
+        $rows[] = [btn($this->i->t('shop_classic'), 'pg:all:1', 'primary'), btn($this->i->t('btn_points'), 'm:points', 'success')];
+        $rows[] = [btn($this->i->t('btn_back'), 'm:home', 'primary')];
         $edit($this->i->t('shop_title'), inline_kb($rows));
     }
 
@@ -538,20 +657,21 @@ class Bot {
         $cat = $pdo->prepare("SELECT name FROM categories WHERE id=?");
         $cat->execute([$catId]);
         $catName = $cat->fetch()['name'] ?? 'Category';
-        $txt = "📁 {$catName} — Page {$page}/{$pages}\n";
+        $txt = "📁 " . esc($catName) . " — Page {$page}/{$pages}\n";
         $rows = [];
+        $i = 0;
         foreach ($st->fetchAll() as $p) {
             $stock = (int)$p['stock'];
             $label = ($p['status'] === 'out_of_stock' || $stock === 0)
                 ? "❌ {$p['name']} — \${$p['price_usd']}"
                 : "{$p['name']} — \${$p['price_usd']} [{$stock} stock]";
-            $rows[] = [btn($label, 'p:' . $p['id'])];
+            $rows[] = [btn($label, 'p:' . $p['id'], $this->altStyle($i++))];
         }
         $nav = [];
-        if ($page > 1) $nav[] = btn('⬅️ Prev', 'cat:' . $catId . ':' . ($page - 1));
-        if ($page < $pages) $nav[] = btn('Next ➡️', 'cat:' . $catId . ':' . ($page + 1));
+        if ($page > 1) $nav[] = btn('⬅️ Prev', 'cat:' . $catId . ':' . ($page - 1), 'primary');
+        if ($page < $pages) $nav[] = btn('Next ➡️', 'cat:' . $catId . ':' . ($page + 1), 'success');
         if ($nav) $rows[] = $nav;
-        $rows[] = [btn($this->i->t('btn_back'), 'm:shop')];
+        $rows[] = [btn($this->i->t('btn_back'), 'm:shop', 'primary')];
         $edit($txt, inline_kb($rows));
     }
 
@@ -567,38 +687,43 @@ class Bot {
         if (!$p) { $edit('❌ Product not found.', $this->backHomeKb()); return; }
         $stock = (int)$p['stock'];
         $status = ($p['status'] === 'out_of_stock' || $stock === 0) ? '❌ Out of Stock' : '✅ Active';
-        $txt = "📦 {$p['name']}\n\n" . ($p['description'] ?: '') .
+        $txt = "📦 " . esc($p['name']) . "\n\n" . esc($p['description'] ?: '') .
             "\n\nPrice: \${$p['price_usd']} ≈ Rs. " . pkr_of($this->bot['id'], $p['price_usd']) .
             "\nStatus: {$status}\nDelivery: 🤖 Auto Delivery\nFormat: 🎁 {$p['delivery_format']}" .
             "\nIn Stock: {$stock}\nSold: {$p['sold_count']}";
+        $botName = $this->bot['username'] ?: $this->bot['name'];
+        $shareUrl = 'https://t.me/share/url?url=' . urlencode('https://t.me/' . $botName)
+            . '&text=' . urlencode('📦 ' . $p['name'] . ' — $' . fmt_usd($p['price_usd']) . ' on ' . $this->bot['name'] . '!');
         $kb = inline_kb([
-            [btn('❤️ Add to Favorites', 'fav:' . $p['id']), btn('🛒 Buy Now', 'buy:' . $p['id'])],
-            [btn('🔢 Buy Multiple', 'buym:' . $p['id']), btn('⭐ View Reviews', 'rev')],
-            [btn('📤 Share', 'share:' . $p['id']), btn($this->i->t('btn_back'), 'm:shop')],
+            [btn('❤️ Add to Favorites', 'fav:' . $p['id'], 'success'), btn('🛒 Buy Now', 'buy:' . $p['id'], 'primary')],
+            [btn('🔢 Buy Multiple', 'buym:' . $p['id'], 'primary'), btn('⭐ View Reviews', 'rev:' . $p['id'], 'success')],
+            [btn_url('📤 Share', $shareUrl, 'success'), btn($this->i->t('btn_back'), 'm:shop', 'primary')],
         ]);
         $edit($txt, $kb);
     }
 
-    private function showConfirm(int $pid, int $qty, ?int $msgId = null, bool $isMedia = false): void {
+    private function showConfirm(int $pid, int $qty, $edit = null): void {
         $p = $this->product($pid);
-        if (!$p) return;
+        if (!$p) {
+            $msg = '❌ Product not found.';
+            if ($edit) $edit($msg, $this->backHomeKb());
+            else $this->showTracked($msg, $this->backHomeKb());
+            return;
+        }
         $total = (float)$p['price_usd'] * $qty;
         $txt = $this->i->t('confirm_title', [
-            'product' => $p['name'], 'qty' => $qty,
+            'product' => esc($p['name']), 'qty' => $qty,
             'total' => fmt_usd($total), 'pkr' => pkr_of($this->bot['id'], $total),
         ]);
         $kb = inline_kb([
-            [btn('💎 Pay with Points (Wallet)', 'cf:' . $pid . ':' . $qty . ':points')],
-            [btn('🟡 Binance Auto Pay', 'cf:' . $pid . ':' . $qty . ':binance')],
-            [btn('💰 USDT (BEP20)', 'cf:' . $pid . ':' . $qty . ':bep20'), btn('💰 USDT (Solana)', 'cf:' . $pid . ':' . $qty . ':sol')],
-            [btn('💰 USDT (TON)', 'cf:' . $pid . ':' . $qty . ':ton'), btn('⭐ Telegram Stars', 'cf:' . $pid . ':' . $qty . ':stars')],
-            [btn($this->i->t('btn_back'), 'p:' . $pid)],
+            [btn('💎 Pay with Points (Wallet)', 'cf:' . $pid . ':' . $qty . ':points', 'primary')],
+            [btn('🟡 Binance Auto Pay', 'cf:' . $pid . ':' . $qty . ':binance', 'success')],
+            [btn('💰 USDT (BEP20)', 'cf:' . $pid . ':' . $qty . ':bep20', 'primary'), btn('💰 USDT (Solana)', 'cf:' . $pid . ':' . $qty . ':sol', 'success')],
+            [btn('💰 USDT (TON)', 'cf:' . $pid . ':' . $qty . ':ton', 'primary'), btn('⭐ Telegram Stars', 'cf:' . $pid . ':' . $qty . ':stars', 'success')],
+            [btn($this->i->t('btn_back'), 'p:' . $pid, 'primary')],
         ]);
-        if ($msgId) {
-            if ($isMedia) tg_edit_caption($this->token, $this->chatId, $msgId, $txt, $kb);
-            else tg_edit($this->token, $this->chatId, $msgId, $txt, $kb);
-        }
-        else tg_send($this->token, $this->chatId, $txt, $kb);
+        if ($edit) $edit($txt, $kb);
+        else $this->showTracked($txt, $kb);
     }
 
     private function confirmPurchase(callable $edit, int $pid, int $qty, string $method): void {
@@ -632,19 +757,26 @@ class Bot {
         $net = ['bep20' => 'BEP20', 'sol' => 'Solana', 'ton' => 'TON', 'binance' => 'Binance Pay'][ $method ] ?? $method;
         $txt = $this->i->t('pay_title', ['order_id' => $oid, 'amount' => fmt_usd($total), 'network' => $net, 'address' => $addr]);
         $kb = inline_kb([
-            [btn('📋 Copy Payment Address', 'ps:' . $oid)],
-            [btn('✅ Payment Sent', 'ps:' . $oid), btn('🔍 Check Payment', 'pc:' . $oid)],
-            [btn('❌ Cancel Payment', 'px:' . $oid)],
+            [btn('📋 Copy Payment Address', 'copy:o:' . $oid, 'primary')],
+            [btn('✅ Payment Sent', 'ps:o:' . $oid, 'success'), btn('🔍 Check Payment', 'pc:o:' . $oid, 'primary')],
+            [btn('❌ Cancel Payment', 'px:o:' . $oid, 'danger')],
         ]);
         $edit($txt, $kb);
+    }
+
+    // Deduct points wallet-first, then referral — never let the wallet
+    // go negative when the user paid partly with referral points.
+    private function deductPoints(float $need): void {
+        $wallet = (float)$this->user['points_wallet'];
+        $fromWallet = min($wallet, $need);
+        $fromRef = $need - $fromWallet;
+        if ($fromWallet > 0) add_points($this->bot['id'], $this->user['id'], -$fromWallet, 'order_payment', 'order', null);
+        if ($fromRef > 0) add_points($this->bot['id'], $this->user['id'], -$fromRef, 'referral_spent', 'order', null);
     }
 
     private function createAndDeliverOrder(array $p, int $qty, float $total, string $method, string $txid, callable $edit = null): void {
         $pdo = db();
         $need = points_for($this->bot['id'], $total);
-        if ($method === 'points') {
-            add_points($this->bot['id'], $this->user['id'], -$need, 'order_payment', 'order', null);
-        }
         $pdo->beginTransaction();
         try {
             $pdo->prepare("INSERT INTO orders (bot_id, user_id, product_id, qty, unit_price, total_usd, status, payment_method, txid, delivered_at) VALUES (?,?,?,?,?,?, 'delivered', ?, ?, NOW())")
@@ -654,6 +786,9 @@ class Bot {
             $st->execute([$this->bot['id'], $p['id']]);
             $items = $st->fetchAll();
             if (count($items) < $qty) throw new Exception('not enough stock');
+            // Deduct only now that stock is reserved: a failed delivery
+            // rolls the points back too.
+            if ($method === 'points') $this->deductPoints($need);
             $contents = [];
             foreach ($items as $it) {
                 $pdo->prepare("UPDATE stock_items SET status='sold', sold_order_id=? WHERE id=?")->execute([$oid, $it['id']]);
@@ -676,7 +811,7 @@ class Bot {
     }
 
     private function deliver(int $oid, array $p, int $qty, array $contents, ?callable $edit): void {
-        $title = $this->i->t('delivered_title', ['order_id' => $oid, 'product' => $p['name'], 'qty' => $qty]);
+        $title = $this->i->t('delivered_title', ['order_id' => $oid, 'product' => esc($p['name']), 'qty' => $qty]);
         if (count($contents) <= 9) {
             $txt = $title . "\n\n" . implode("\n", $contents);
             if ($edit) $edit($txt, $this->backHomeKb());
@@ -719,6 +854,18 @@ class Bot {
         $this->chatId = (int)$msg['chat']['id'];
         $this->getUser($msg['from']);
         $payload = $msg['successful_payment']['invoice_payload'] ?? '';
+        if (str_starts_with($payload, 'deposit:')) {
+            $did = (int)substr($payload, 8);
+            $st = db()->prepare("SELECT * FROM deposits WHERE id=? AND bot_id=? AND user_id=? AND status='pending'");
+            $st->execute([$did, $this->bot['id'], $this->user['id']]);
+            $dep = $st->fetch();
+            if (!$dep) return;
+            db()->prepare("UPDATE deposits SET status='confirmed' WHERE id=?")->execute([$did]);
+            add_points($this->bot['id'], $this->user['id'], (float)$dep['points'], 'deposit', 'deposit', $did);
+            $this->refreshUser();
+            tg_send($this->token, $this->chatId, "✅ Deposit confirmed! +" . fmt_points($dep['points']) . " points (Deposit #{$did}, \$" . fmt_usd($dep['amount_usd']) . "). Your balance is now " . fmt_points((float)$this->user['points_wallet'] + (float)$this->user['points_referral']) . " points.");
+            return;
+        }
         if (!str_starts_with($payload, 'order:')) return;
         $oid = (int)substr($payload, 6);
         $st = db()->prepare("SELECT o.*, p.name pname FROM orders o JOIN products p ON p.id=o.product_id WHERE o.id=? AND o.bot_id=? AND o.status='pending'");
@@ -726,6 +873,7 @@ class Bot {
         $o = $st->fetch();
         if (!$o) return;
         $p = $this->product((int)$o['product_id']);
+        if (!$p) return;
         $this->createAndDeliverOrder($p, (int)$o['qty'], (float)$o['total_usd'], 'stars', $msg['successful_payment']['telegram_payment_charge_id'] ?? '');
     }
 
@@ -736,7 +884,7 @@ class Bot {
             ->execute([$this->bot['id'], $this->user['id'], $usd, $points, $method]);
         $did = (int)$pdo->lastInsertId();
         if ($method === 'stars') {
-            tg_api($this->token, 'sendInvoice', [
+            $res = tg_api($this->token, 'sendInvoice', [
                 'chat_id' => $this->chatId,
                 'title' => 'Buy ' . fmt_points($points) . ' Points',
                 'description' => 'Deposit $' . fmt_usd($usd) . ' for ' . fmt_points($points) . ' points',
@@ -744,6 +892,11 @@ class Bot {
                 'currency' => 'XTR',
                 'prices' => json_encode([['label' => 'Points', 'amount' => (int)round($usd * 100)]]),
             ]);
+            if (!($res['ok'] ?? false)) {
+                $edit('❌ Telegram Stars payment could not be started. Try another payment method.', $this->backHomeKb());
+                db()->prepare("UPDATE deposits SET status='failed' WHERE id=?")->execute([$did]);
+                return;
+            }
             $edit('⭐ Stars invoice sent. Complete the payment in Telegram to receive your points.', $this->backHomeKb());
             return;
         }
@@ -754,33 +907,64 @@ class Bot {
         $net = ['bep20' => 'BEP20', 'sol' => 'Solana', 'ton' => 'TON', 'binance' => 'Binance Pay'][$method] ?? $method;
         $txt = "💰 Deposit #{$did}\n\nAmount: \${$usd} (" . fmt_points($points) . " points)\nSend Exactly \${$usd} ({$net}) to:\n{$addr}\n\nYou have 15 minutes. After sending, paste your TXID or tap Payment Sent.";
         $kb = inline_kb([
-            [btn('✅ Payment Sent', 'ps:' . $did), btn('🔍 Check Payment', 'pc:' . $did)],
-            [btn('❌ Cancel', 'px:' . $did)],
+            [btn('✅ Payment Sent', 'ps:d:' . $did, 'success'), btn('🔍 Check Payment', 'pc:d:' . $did, 'primary')],
+            [btn('❌ Cancel', 'px:d:' . $did, 'danger')],
         ]);
         $edit($txt, $kb);
     }
 
-    private function checkPayment(callable $edit, int $refId): void {
+    // Send the payment address as a tappable code block so the user can
+    // copy it. $type is 'o' (order) or 'd' (deposit).
+    private function copyPaymentAddress(callable $edit, string $type, int $refId): void {
+        $pdo = db();
+        $method = '';
+        if ($type === 'd') {
+            $st = $pdo->prepare("SELECT method FROM deposits WHERE id=? AND bot_id=? AND user_id=?");
+            $st->execute([$refId, $this->bot['id'], $this->user['id']]);
+            $row = $st->fetch();
+            $method = $row['method'] ?? '';
+        } else {
+            $st = $pdo->prepare("SELECT payment_method FROM orders WHERE id=? AND bot_id=? AND user_id=?");
+            $st->execute([$refId, $this->bot['id'], $this->user['id']]);
+            $row = $st->fetch();
+            $method = $row['payment_method'] ?? '';
+        }
+        if ($method === '') { $edit('❌ Reference not found.', $this->backHomeKb()); return; }
+        $pm = $pdo->prepare("SELECT details FROM payment_methods WHERE bot_id=? AND code=?");
+        $pm->execute([$this->bot['id'], $method]);
+        $details = json_decode($pm->fetch()['details'] ?? '{}', true) ?: [];
+        $addr = $details['address'] ?? $details['uid'] ?? '';
+        if ($addr === '') { $edit('❌ No wallet address is set for this method yet.', $this->backHomeKb()); return; }
+        tg_send($this->token, $this->chatId, "📋 Payment address — tap to copy:\n\n<code>" . esc($addr) . "</code>");
+    }
+
+    private function checkPayment(callable $edit, string $type, int $refId): void {
         // Placeholder verification: crypto cannot be auto-verified without a
         // chain indexer. If a TXID was recorded, the order/deposit stays pending
         // for admin confirmation; otherwise ask for the TXID.
         $pdo = db();
-        $st = $pdo->prepare("SELECT txid FROM orders WHERE id=? AND bot_id=?");
-        $st->execute([$refId, $this->bot['id']]);
+        $table = $type === 'd' ? 'deposits' : 'orders';
+        $st = $pdo->prepare("SELECT txid FROM $table WHERE id=? AND bot_id=? AND user_id=?");
+        $st->execute([$refId, $this->bot['id'], $this->user['id']]);
         $o = $st->fetch();
         if ($o && $o['txid'] !== '') {
-            $edit("⏳ Payment for order #{$refId} is under admin review (TXID: {$o['txid']}). You will be notified once confirmed.", $this->backHomeKb());
+            $edit("⏳ Payment for #{$refId} is under admin review (TXID: " . esc($o['txid']) . "). You will be notified once confirmed.", $this->backHomeKb());
             return;
         }
-        $this->setState('await_txid:' . $refId);
+        $this->setState('await_txid:' . $type . ':' . $refId);
         $edit("📋 No TXID recorded yet for #{$refId}. Please paste your transaction ID (TXID) here and an admin will verify it.", $this->backHomeKb());
     }
 
-    private function cancelOrder(callable $edit, int $oid): void {
+    private function cancelOrder(callable $edit, string $type, int $oid): void {
         $pdo = db();
-        $pdo->prepare("UPDATE orders SET status='cancelled' WHERE id=? AND bot_id=? AND user_id=? AND status='pending'")
-            ->execute([$oid, $this->bot['id'], $this->user['id']]);
-        $edit("❌ Order #{$oid} cancelled.", $this->backHomeKb());
+        if ($type === 'd') {
+            $pdo->prepare("UPDATE deposits SET status='cancelled' WHERE id=? AND bot_id=? AND user_id=? AND status='pending'")
+                ->execute([$oid, $this->bot['id'], $this->user['id']]);
+        } else {
+            $pdo->prepare("UPDATE orders SET status='cancelled' WHERE id=? AND bot_id=? AND user_id=? AND status='pending'")
+                ->execute([$oid, $this->bot['id'], $this->user['id']]);
+        }
+        $edit("❌ #{$oid} cancelled.", $this->backHomeKb());
     }
 
     private function showPointsCb(callable $edit): void {
@@ -788,9 +972,9 @@ class Bot {
         $rate = setting($this->bot['id'], 'points_rate', 10);
         $txt = $this->i->t('points_title', ['points' => fmt_points($points), 'rate' => $rate]);
         $kb = inline_kb([
-            [btn('$1', 'pp:1'), btn('$5', 'pp:5'), btn('$10', 'pp:10'), btn('$25', 'pp:25')],
-            [btn('✏️ Custom Amount', 'pp:custom')],
-            [btn($this->i->t('btn_back'), 'm:home')],
+            [btn('$1', 'pp:1', 'primary'), btn('$5', 'pp:5', 'success'), btn('$10', 'pp:10', 'primary'), btn('$25', 'pp:25', 'success')],
+            [btn('✏️ Custom Amount', 'pp:custom', 'primary')],
+            [btn($this->i->t('btn_back'), 'm:home', 'primary')],
         ]);
         $edit($txt, $kb);
     }
@@ -802,7 +986,7 @@ class Bot {
         $st->execute([$this->bot['id'], $u['id']]);
         $refs = (int)$st->fetch()['c'];
         $txt = $this->i->t('account_title', [
-            'name' => $u['first_name'], 'username' => $u['username'] ?: '—',
+            'name' => esc($u['first_name']), 'username' => esc($u['username']) ?: '—',
             'user_id' => $u['telegram_id'], 'joined' => substr($u['joined_at'], 0, 10),
             'points' => fmt_points($points), 'wallet' => fmt_points($u['points_wallet']),
             'referral' => fmt_points($u['points_referral']),
@@ -828,22 +1012,23 @@ class Bot {
         $st->execute($params);
         $txt = $this->i->t('price_title', ['count' => $total]) . "\n\n";
         $rows = [];
+        $i = 0;
         foreach ($st->fetchAll() as $p) {
             $mark = $p['status'] === 'out_of_stock' ? '❌' : '✅';
-            $txt .= "{$mark} {$p['name']} — \${$p['price_usd']}\n";
-            $rows[] = [btn($p['name'] . ' — $' . $p['price_usd'], 'p:' . $p['id'])];
+            $txt .= "{$mark} " . esc($p['name']) . " — \${$p['price_usd']}\n";
+            $rows[] = [btn($p['name'] . ' — $' . $p['price_usd'], 'p:' . $p['id'], $this->altStyle($i++))];
         }
         $nav = [
-            btn('✅ Available', 'pg:available:1'),
-            btn('❌ Out of Stock', 'pg:out:1'),
-            btn('📋 All', 'pg:all:1'),
+            btn('✅ Available', 'pg:available:1', 'success'),
+            btn('❌ Out of Stock', 'pg:out:1', 'danger'),
+            btn('📋 All', 'pg:all:1', 'primary'),
         ];
         $rows[] = $nav;
         $pg = [];
-        if ($page > 1) $pg[] = btn('⬅️ Prev', 'pg:' . $filter . ':' . ($page - 1));
-        if ($page < $pages) $pg[] = btn('Next ➡️', 'pg:' . $filter . ':' . ($page + 1));
+        if ($page > 1) $pg[] = btn('⬅️ Prev', 'pg:' . $filter . ':' . ($page - 1), 'primary');
+        if ($page < $pages) $pg[] = btn('Next ➡️', 'pg:' . $filter . ':' . ($page + 1), 'success');
         if ($pg) $rows[] = $pg;
-        $rows[] = [btn($this->i->t('btn_back'), 'm:home')];
+        $rows[] = [btn($this->i->t('btn_back'), 'm:home', 'primary')];
         $edit($txt, inline_kb($rows));
     }
 
@@ -860,12 +1045,12 @@ class Bot {
         $st = $pdo->prepare("SELECT o.*, p.name pname FROM orders o JOIN products p ON p.id=o.product_id WHERE $where ORDER BY o.created_at DESC LIMIT 10 OFFSET $off");
         $st->execute($params);
         foreach ($st->fetchAll() as $o) {
-            $txt .= "\n\n#{$o['id']} — {$o['pname']} ×{$o['qty']} — \${$o['total_usd']} — {$o['status']}";
+            $txt .= "\n\n#{$o['id']} — " . esc($o['pname']) . " ×{$o['qty']} — \${$o['total_usd']} — {$o['status']}";
         }
         $kb = inline_kb([
-            [btn('✅ Delivered', 'ord:delivered:1'), btn('⏳ Pending', 'ord:pending:1')],
-            [btn('↩️ Refunded', 'ord:refunded:1'), btn('❌ Cancelled', 'ord:cancelled:1')],
-            [btn('📋 All', 'ord:all:1'), btn($this->i->t('btn_back'), 'm:home')],
+            [btn('✅ Delivered', 'ord:delivered:1', 'primary'), btn('⏳ Pending', 'ord:pending:1', 'success')],
+            [btn('↩️ Refunded', 'ord:refunded:1', 'primary'), btn('❌ Cancelled', 'ord:cancelled:1', 'success')],
+            [btn('📋 All', 'ord:all:1', 'primary'), btn($this->i->t('btn_back'), 'm:home', 'primary')],
         ]);
         $edit($txt, $kb);
     }
@@ -875,10 +1060,10 @@ class Bot {
         $st->execute([$oid, $this->bot['id'], $this->user['id']]);
         $o = $st->fetch();
         if (!$o) { $edit('❌ Order not found.', $this->backHomeKb()); return; }
-        $txt = "🧾 Order #{$o['id']}\n\nProduct: {$o['pname']}\nQty: {$o['qty']}\nTotal: \${$o['total_usd']}\nStatus: {$o['status']}\nPayment: {$o['payment_method']}\nDate: {$o['created_at']}";
+        $txt = "🧾 Order #{$o['id']}\n\nProduct: " . esc($o['pname']) . "\nQty: {$o['qty']}\nTotal: \${$o['total_usd']}\nStatus: {$o['status']}\nPayment: {$o['payment_method']}\nDate: {$o['created_at']}";
         $kb = inline_kb([
-            [btn('🛡️ Warranty Claim', 'warc:warranty:' . $o['id']), btn('↩️ Refund Request', 'warc:refund:' . $o['id'])],
-            [btn($this->i->t('btn_back'), 'ord:all:1')],
+            [btn('🛡️ Warranty Claim', 'warc:warranty:' . $o['id'], 'primary'), btn('↩️ Refund Request', 'warc:refund:' . $o['id'], 'danger')],
+            [btn($this->i->t('btn_back'), 'ord:all:1', 'primary')],
         ]);
         $edit($txt, $kb);
     }
@@ -925,8 +1110,8 @@ class Bot {
             'milestone_reward' => setting($this->bot['id'], 'referral_milestone_reward', 10),
         ]);
         $kb = inline_kb([
-            [btn_url('📤 Share My Link', 'https://t.me/share/url?url=' . urlencode($link) . '&text=' . urlencode('Join ' . $this->bot['name'] . ' and earn rewards!'))],
-            [btn($this->i->t('btn_back'), 'm:home')],
+            [btn_url('📤 Share My Link', 'https://t.me/share/url?url=' . urlencode($link) . '&text=' . urlencode('Join ' . $this->bot['name'] . ' and earn rewards!'), 'success')],
+            [btn($this->i->t('btn_back'), 'm:home', 'primary')],
         ]);
         $edit($txt, $kb);
     }
@@ -937,8 +1122,8 @@ class Bot {
         $r = $st->fetch();
         $txt = $this->i->t('support_title', ['total' => (int)$r['c'], 'open' => (int)$r['o']]);
         $kb = inline_kb([
-            [btn('✉️ New Ticket', 'tic:new'), btn('📋 My Tickets', 'tic:list')],
-            [btn($this->i->t('btn_back'), 'm:home')],
+            [btn('✉️ New Ticket', 'tic:new', 'primary'), btn('📋 My Tickets', 'tic:list', 'success')],
+            [btn($this->i->t('btn_back'), 'm:home', 'primary')],
         ]);
         $edit($txt, $kb);
     }
@@ -949,7 +1134,7 @@ class Bot {
         $rows = $st->fetchAll();
         if (!$rows) { $edit('📋 You have no tickets yet.', $this->backHomeKb()); return; }
         $txt = "📋 My Tickets\n";
-        foreach ($rows as $t) $txt .= "\n#{$t['id']} — {$t['subject']} — {$t['status']}";
+        foreach ($rows as $t) $txt .= "\n#{$t['id']} — " . esc($t['subject']) . " — {$t['status']}";
         $edit($txt, $this->backHomeKb());
     }
 
@@ -959,8 +1144,9 @@ class Bot {
         $rows = $st->fetchAll();
         if (!$rows) { $edit($this->i->t('warranty_title') . "\n\nNo delivered orders yet.", $this->backHomeKb()); return; }
         $kbRows = [];
-        foreach ($rows as $o) $kbRows[] = [btn("#{$o['id']} — {$o['pname']}", 'o:' . $o['id'])];
-        $kbRows[] = [btn($this->i->t('btn_back'), 'm:home')];
+        $i = 0;
+        foreach ($rows as $o) $kbRows[] = [btn("#{$o['id']} — {$o['pname']}", 'o:' . $o['id'], $this->altStyle($i++))];
+        $kbRows[] = [btn($this->i->t('btn_back'), 'm:home', 'primary')];
         $edit($this->i->t('warranty_title'), inline_kb($kbRows));
     }
 
@@ -979,17 +1165,34 @@ class Bot {
             WHERE o.bot_id=? AND o.user_id=? AND o.status='delivered'
             AND NOT EXISTS (SELECT 1 FROM reviews r WHERE r.product_id=o.product_id AND r.user_id=o.user_id) LIMIT 5");
         $st->execute([$this->bot['id'], $this->user['id']]);
-        foreach ($st->fetchAll() as $p) $kbRows[] = [btn('⭐ Review: ' . $p['name'], 'revrate:5:' . $p['id'])];
-        $kbRows[] = [btn($this->i->t('btn_back'), 'm:home')];
+        $i = 0;
+        foreach ($st->fetchAll() as $p) $kbRows[] = [btn('⭐ Review: ' . $p['name'], 'revrate:5:' . $p['id'], $this->altStyle($i++))];
+        $kbRows[] = [btn($this->i->t('btn_back'), 'm:home', 'primary')];
         $edit($txt, inline_kb($kbRows));
+    }
+
+    // Reviews of one product (from its detail page), approved only.
+    private function showProductReviews(callable $edit, int $pid): void {
+        $p = $this->product($pid);
+        if (!$p) { $edit('❌ Product not found.', $this->backHomeKb()); return; }
+        $st = db()->prepare("SELECT r.rating, r.text, u.first_name FROM reviews r JOIN users u ON u.id=r.user_id WHERE r.bot_id=? AND r.product_id=? AND r.status='approved' ORDER BY r.created_at DESC LIMIT 5");
+        $st->execute([$this->bot['id'], $pid]);
+        $rows = $st->fetchAll();
+        $txt = "⭐ Reviews — " . esc($p['name']) . "\n";
+        if (!$rows) $txt .= "\nNo reviews yet.";
+        foreach ($rows as $r) {
+            $txt .= "\n\n" . str_repeat('⭐', max(1, min(5, (int)$r['rating']))) . ' ' . esc($r['first_name']) . "\n" . esc($r['text'] ?? '');
+        }
+        $edit($txt, inline_kb([[btn($this->i->t('btn_back'), 'p:' . $pid, 'primary')]]));
     }
 
     private function showLanguageCb(callable $edit): void {
         $st = db()->prepare("SELECT * FROM languages WHERE bot_id=? AND active=1 ORDER BY sort ASC");
         $st->execute([$this->bot['id']]);
         $rows = [];
-        foreach ($st->fetchAll() as $l) $rows[] = [btn($l['name'] . ' — ' . $l['native_name'], 'lang:' . $l['code'])];
-        $rows[] = [btn($this->i->t('btn_back'), 'm:home')];
+        $i = 0;
+        foreach ($st->fetchAll() as $l) $rows[] = [btn($l['name'] . ' — ' . $l['native_name'], 'lang:' . $l['code'], $this->altStyle($i++))];
+        $rows[] = [btn($this->i->t('btn_back'), 'm:home', 'primary')];
         $edit($this->i->t('language_title'), inline_kb($rows));
     }
 
@@ -999,7 +1202,7 @@ class Bot {
         $body = $this->i->t('howto_' . $key);
         if ($body === 'howto_' . $key) $body = $topics[$key]['body'];
         $txt = $this->i->t('howto_body', ['topic' => $topics[$key]['title'], 'body' => $body]);
-        $edit($txt, inline_kb([[btn($this->i->t('btn_back'), 'm:howto')]]));
+        $edit($txt, inline_kb([[btn($this->i->t('btn_back'), 'm:howto', 'primary')]]));
     }
 
     private function claimFreebie(callable $edit, int $fid): void {
@@ -1017,7 +1220,7 @@ class Bot {
         $pdo->prepare("INSERT INTO freebie_claims (bot_id, freebie_id, user_id) VALUES (?,?,?)")
             ->execute([$this->bot['id'], $fid, $this->user['id']]);
         $pdo->prepare("UPDATE freebies SET claims_count = claims_count + 1 WHERE id=?")->execute([$fid]);
-        $txt = "🎁 {$f['title']}\n\n" . ($f['delivery_text'] ?: '') .
+        $txt = "🎁 " . esc($f['title']) . "\n\n" . ($f['delivery_text'] ?: '') .
             "\n\n🧾 Invoice: FREE — Order #F{$fid}-{$this->user['id']}";
         $edit($txt, $this->backHomeKb());
     }

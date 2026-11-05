@@ -39,7 +39,11 @@ function tg_edit_caption(string $token, int $chatId, int $msgId, string $caption
     // (delivery credentials must never be truncated).
     if (mb_strlen($caption) > 1024) {
         tg_api($token, 'deleteMessage', ['chat_id' => $chatId, 'message_id' => $msgId]);
-        return tg_send($token, $chatId, $caption, $markup);
+        $r = tg_send($token, $chatId, $caption, $markup);
+        // Tell callers the message is now a plain text message, not the
+        // original media message (different id, different edit method).
+        $r['_fallback_text'] = true;
+        return $r;
     }
     $p = ['chat_id' => $chatId, 'message_id' => $msgId, 'caption' => $caption,
           'parse_mode' => 'HTML'];
@@ -85,4 +89,8 @@ function btn_kb(string $text, ?string $style = null): array {
     if ($style !== null) $b['style'] = $style;
     return $b;
 }
-function btn_url(string $text, string $url): array { return ['text' => $text, 'url' => $url]; }
+function btn_url(string $text, string $url, ?string $style = null): array {
+    $b = ['text' => $text, 'url' => $url];
+    if ($style !== null) $b['style'] = $style;
+    return $b;
+}
