@@ -70,9 +70,10 @@ if ($botId) {
 <h1>AI tools, accounts &amp; credits.<br><span class="grad-text">Instantly delivered.</span></h1>
 <p class="lead">ChatGPT, Claude, Netflix, Spotify aur 170+ premium products, aik hi jagah. Telegram bot kholo, buy karo, seconds me delivery pao.</p>
 <div class="hero-cta">
-<?php if ($tgLink): ?><a class="btn btn-green" href="<?= esc($tgLink) ?>">Open in Telegram ↗</a><?php else: ?><span class="badge warn">Bot is being connected…</span><?php endif; ?>
+<?php if ($tgLink): ?><a class="btn btn-green" href="<?= esc($tgLink) ?>">Open in Telegram ↗</a><?php endif; ?>
 <a class="btn btn2" href="#all">Browse products ↓</a>
 </div>
+<?php if (!$tgLink): ?><p class="mut" style="margin:0 0 14px">Telegram bot is being connected — you can browse all <?= (int)$totalProducts ?> products below right now.</p><?php endif; ?>
 <div class="trust-row">
 <span>⚡ Instant auto delivery</span>
 <span>🔒 Secure crypto &amp; points payments</span>
