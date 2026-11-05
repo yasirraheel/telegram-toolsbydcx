@@ -30,6 +30,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'delete') {
         $pdo->prepare("DELETE FROM payment_methods WHERE id=? AND bot_id=?")->execute([post_int('id'), $botId]);
         flash('Payment method deleted.');
+    } elseif ($action === 'wallets') {
+        // Plain wallet fields (no JSON needed): saved into each method's details.
+        $fields = [
+            'binance' => ['key' => 'uid',     'name' => 'Binance Auto Pay'],
+            'bep20'   => ['key' => 'address', 'name' => 'USDT (BEP20)'],
+            'sol'     => ['key' => 'address', 'name' => 'USDT (Solana)'],
+            'ton'     => ['key' => 'address', 'name' => 'USDT (TON)'],
+        ];
+        $saved = [];
+        foreach ($fields as $code => $f) {
+            $val = trim((string)($_POST[$code] ?? ''));
+            $st = $pdo->prepare("SELECT * FROM payment_methods WHERE bot_id=? AND code=?");
+            $st->execute([$botId, $code]);
+            $row = $st->fetch();
+            $details = $row ? (json_decode((string)$row['details'], true) ?: []) : [];
+            if ($val === '') { unset($details[$f['key']]); } else { $details[$f['key']] = $val; }
+            $json = json_encode($details);
+            if ($row) {
+                $pdo->prepare("UPDATE payment_methods SET details=? WHERE id=? AND bot_id=?")->execute([$json, (int)$row['id'], $botId]);
+            } elseif ($val !== '') {
+                $pdo->prepare("INSERT INTO payment_methods (bot_id, code, name, details, sort, active) VALUES (?,?,?,?,?,1)")
+                    ->execute([$botId, $code, $f['name'], $json, 0]);
+            }
+            if ($val !== '') $saved[] = $f['name'];
+        }
+        flash($saved ? 'Wallets saved: ' . implode(', ', $saved) . '. The bot shows these addresses to buyers at checkout.' : 'Wallets cleared.');
     }
     redirect('index.php?page=payments');
 }
@@ -46,7 +72,30 @@ $rows->execute([$botId]);
 $rows = $rows->fetchAll();
 
 admin_head('Payment Methods', 'payments', $botId, $bots);
+
+$walletOf = function (string $code, string $key) use ($rows): string {
+    foreach ($rows as $r) {
+        if ($r['code'] === $code) {
+            $d = json_decode((string)$r['details'], true) ?: [];
+            return (string)($d[$key] ?? '');
+        }
+    }
+    return '';
+};
 ?>
+<div class="card"><h3 style="margin-top:0">💰 Crypto wallets</h3>
+<p class="mut" style="margin-top:0">Put your wallet addresses here. The bot shows them to buyers at checkout — nothing is hardcoded. Leave a field empty to hide that method's address.</p>
+<form method="post"><input type="hidden" name="action" value="wallets"><?= csrf_field() ?>
+<label>Binance Pay — Pay ID / UID</label>
+<input type="text" name="binance" value="<?= esc($walletOf('binance', 'uid')) ?>" placeholder="e.g. 123456789">
+<label>USDT (BEP20) — wallet address</label>
+<input type="text" name="bep20" value="<?= esc($walletOf('bep20', 'address')) ?>" placeholder="0x...">
+<label>USDT (Solana) — wallet address</label>
+<input type="text" name="sol" value="<?= esc($walletOf('sol', 'address')) ?>" placeholder="e.g. 7x...">
+<label>USDT (TON) — wallet address</label>
+<input type="text" name="ton" value="<?= esc($walletOf('ton', 'address')) ?>" placeholder="e.g. UQ...">
+<button type="submit" style="margin-top:12px">Save wallets</button></form></div>
+
 <div class="card"><h3 style="margin-top:0"><?= $edit ? '✏️ Edit payment method' : '➕ Add payment method' ?></h3>
 <form method="post"><input type="hidden" name="action" value="save"><?= csrf_field() ?>
 <input type="hidden" name="id" value="<?= (int)($edit['id'] ?? 0) ?>">
