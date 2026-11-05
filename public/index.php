@@ -41,7 +41,7 @@ if ($botId) {
     $avgRating = (float)$pdo->query("SELECT COALESCE(AVG(rating),0) FROM reviews WHERE bot_id=$botId AND status='approved'")->fetchColumn();
     $reviewCount = (int)$pdo->query("SELECT COUNT(*) FROM reviews WHERE bot_id=$botId AND status='approved'")->fetchColumn();
     $st = $pdo->prepare(
-        "SELECT r.rating, r.comment, p.name AS product_name, u.username
+        "SELECT r.rating, r.text AS comment, p.name AS product_name, u.username
            FROM reviews r JOIN products p ON p.id=r.product_id JOIN users u ON u.id=r.user_id
           WHERE r.bot_id=? AND r.status='approved' ORDER BY r.created_at DESC LIMIT 6"
     );
