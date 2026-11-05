@@ -27,7 +27,18 @@ class Bot {
             $this->onSuccessfulPayment($update['message']); return;
         }
         if (isset($update['callback_query'])) { $this->onCallback($update['callback_query']); return; }
-        if (isset($update['message'])) { $this->onMessage($update['message']); }
+        if (isset($update['message'])) {
+            $m = $update['message'];
+            $this->onMessage($m);
+            // Keep the chat clean like the original: once the bot has
+            // answered, the user's own tap/command text disappears, so only
+            // the bot's single screen message remains and nothing stacks
+            // up below. Bots may delete incoming messages in private chats;
+            // a failure here is harmless and ignored.
+            if (isset($m['text']) && isset($m['message_id'])) {
+                tg_delete($this->token, (int)$m['chat']['id'], (int)$m['message_id']);
+            }
+        }
     }
 
     // ---------- users ----------

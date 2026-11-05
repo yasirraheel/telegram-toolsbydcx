@@ -50,6 +50,11 @@ function tg_edit_caption(string $token, int $chatId, int $msgId, string $caption
     if ($markup) $p['reply_markup'] = json_encode($markup);
     return tg_api($token, 'editMessageCaption', $p);
 }
+function tg_delete(string $token, int $chatId, int $msgId): array {
+    // Delete a message. In private chats bots may delete incoming (user)
+    // messages too; a failure (e.g. too old) is harmless — caller ignores it.
+    return tg_api($token, 'deleteMessage', ['chat_id' => $chatId, 'message_id' => $msgId]);
+}
 function tg_answer(string $token, string $cbId, ?string $text = null): array {
     $p = ['callback_query_id' => $cbId];
     if ($text) $p['text'] = $text;
