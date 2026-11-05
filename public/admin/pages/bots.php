@@ -12,6 +12,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = post_str('action');
 
+    if ($action === 'updatetoken') {
+        $id = post_int('id');
+        $token = trim((string)($_POST['token'] ?? ''));
+        $row = $id ? bot_by_id($id) : null;
+        if (!$row) { flash('Bot not found.', 'err'); }
+        elseif ($token === '' || !preg_match('/^\d+:[A-Za-z0-9_-]{20,}$/', $token)) {
+            flash('Enter a valid Bot API token (looks like 123456:ABC...).', 'err');
+        } else {
+            $me = tg_api($token, 'getMe');
+            if (empty($me['ok'])) {
+                flash('Telegram rejected this token: ' . ($me['description'] ?? 'getMe failed') . '. Token not saved.', 'err');
+            } else {
+                $username = (string)($me['result']['username'] ?? '');
+                $pdo->prepare("UPDATE bots SET token_enc=?, username=? WHERE id=?")
+                    ->execute([enc_token($token), $username, $id]);
+                $hook = tg_api($token, 'setWebhook', ['url' => webhook_url_for($id, $row['webhook_secret'])]);
+                if (!empty($hook['ok'])) {
+                    $pdo->prepare("UPDATE bots SET active=1 WHERE id=?")->execute([$id]);
+                    flash('Token updated for @' . $username . ' and webhook set. Bot is now active.');
+                } else {
+                    flash('Token updated for @' . $username . ', but setWebhook failed: ' . ($hook['description'] ?? 'unknown error') . '. Use "Set Webhook" to retry.', 'err');
+                }
+                redirect('index.php?page=bots');
+            }
+        }
+    }
+
     if ($action === 'add') {
         $name = post_str('name');
         $token = trim((string)($_POST['token'] ?? ''));
@@ -149,6 +176,13 @@ admin_head('Bots', 'bots', $botId, $bots);
 <label>Bot name</label><input type="text" name="name" placeholder="ToolsByDcx" required>
 <label>Bot API token</label><input type="text" name="token" placeholder="123456789:AAEhBOweik6ad9r_QXMENQjcrGbqCr6bA" required autocomplete="off">
 <button type="submit" style="margin-top:12px">Add bot &amp; set webhook</button></form></div>
+
+<div class="card"><h3 style="margin-top:0">🔑 Update a bot's token</h3>
+<p class="mut">Already have a bot listed below but need to change or add its token? Pick it here — this updates the existing bot, it does not create a new one. The panel encrypts the token, checks it with getMe, and sets the webhook using the bot's existing secret.</p>
+<form method="post"><input type="hidden" name="action" value="updatetoken"><?= csrf_field() ?>
+<div class="row"><div style="width:220px"><label>Bot</label><select name="id"><?php foreach ($bots as $b): ?><option value="<?= (int)$b['id'] ?>"><?= esc($b['name']) ?> (@<?= esc($b['username'] ?: '—') ?>)</option><?php endforeach; ?></select></div>
+<div style="flex:1"><label>New Bot API token</label><input type="text" name="token" placeholder="123456789:AAEhBOweik6ad9r_QXMENQjcrGbqCr6bA" required autocomplete="off"></div></div>
+<button type="submit" style="margin-top:12px">Save token &amp; set webhook</button></form></div>
 
 <div class="card"><h3 style="margin-top:0">🤖 All bots</h3>
 <table><tr><th>ID</th><th>Name</th><th>Username</th><th>Webhook URL</th><th>Active</th><th>Actions</th></tr>
