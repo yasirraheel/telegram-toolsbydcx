@@ -62,8 +62,8 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
 .top{display:flex;gap:16px;align-items:center;justify-content:space-between;padding:16px 0;margin-bottom:18px;flex-wrap:wrap}
 .top h2{margin:0;font-size:20px;font-weight:700}
 .top .tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.search{position:relative}.search input{width:220px;padding:8px 12px 8px 34px;border:1px solid var(--line);border-radius:8px;background:#fff;font:inherit}
-.search span{position:absolute;left:10px;top:8px;color:var(--mut)}
+.search{position:relative}.search input{width:220px;padding:8px 12px 8px 38px;border:1px solid var(--line);border-radius:8px;background:#fff;font:inherit}
+.search span{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--mut);font-size:14px;line-height:1;pointer-events:none}
 .top form{display:flex;gap:8px;align-items:center}
 .userchip{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:20px;padding:5px 12px 5px 6px;font-weight:600}
 .userchip .av{width:26px;height:26px;border-radius:50%;background:var(--acc);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px}
