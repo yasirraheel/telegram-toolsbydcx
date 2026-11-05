@@ -19,6 +19,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Login — ToolsByDcx Admin</title>
+<meta name="theme-color" content="#ff6622">
+<link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32.png">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
 <link rel="stylesheet" href="../assets/site.css?v=4"></head><body class="login-wrap">
 <div class="box"><h1><a href="../" title="Home" style="color:#1f2937;text-decoration:none">🛒 Tools<span style="color:#ff6622">ByDcx</span> Admin</a></h1><p class="mut">Sign in to manage your Telegram store bots.</p>
 <?php foreach (take_flash() as $f): ?><div class="flash"><?= esc($f['msg']) ?></div><?php endforeach; ?>

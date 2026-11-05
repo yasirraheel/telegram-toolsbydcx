@@ -57,7 +57,12 @@ if ($botId) {
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title><?= esc($botName) ?> — Telegram Store</title>
+<title><?= esc($botName) ?> — AI Tools, Accounts &amp; Credits Store</title>
+<meta name="description" content="ToolsByDcx — automated digital marketplace for AI tools, accounts and credits. Shop inside Telegram, instant auto delivery.">
+<meta name="theme-color" content="#ff6622">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <link rel="stylesheet" href="assets/site.css?v=4"></head>
 <body><div class="store">
 <header>

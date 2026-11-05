@@ -46,6 +46,10 @@ function admin_head(string $title, string $page, int $botId, array $bots): void 
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= esc($title) ?> — ToolsByDcx Admin</title>
+<meta name="theme-color" content="#ff6622">
+<link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32.png">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
 <link rel="stylesheet" href="../assets/site.css?v=4"></head>
 <body><div class="wrap">
 <nav class="side" id="sidebar"><h1><a href="index.php?page=dashboard" title="Dashboard">🛒 Tools<span>ByDcx</span></a></h1>
