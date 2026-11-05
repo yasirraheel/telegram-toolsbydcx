@@ -56,6 +56,7 @@ function admin_head(string $title, string $page, int $botId, array $bots): void 
 <?php endforeach; ?>
 <?php endforeach; ?>
 <h4>Account</h4>
+<a href="../" target="_blank" rel="noopener" title="Open the public store landing page">🌐 View Store ↗</a>
 <a href="index.php?page=logout" class="logout">🚪 Logout (<?= esc($_SESSION['admin_username'] ?? 'admin') ?>)</a>
 </nav>
 <main class="main">
@@ -72,6 +73,7 @@ function admin_head(string $title, string $page, int $botId, array $bots): void 
 <noscript><button type="submit">Switch</button></noscript>
 </form>
 <div class="userchip"><span class="av"><?= esc(strtoupper(substr((string)($_SESSION['admin_username'] ?? 'A'), 0, 1))) ?></span><?= esc($_SESSION['admin_username'] ?? 'admin') ?></div>
+<a class="btn btn2 btn-sm" href="../" target="_blank" rel="noopener" title="Open the public store landing page">🌐 View Store</a>
 </div></div>
 <script>
 function filterNav(q){q=q.toLowerCase();document.querySelectorAll('.side a[data-nav]').forEach(function(a){a.style.display=a.dataset.nav.toLowerCase().includes(q)?'':'none';});document.querySelectorAll('.side h4').forEach(function(h){var nxt=h.nextElementSibling,any=false;while(nxt&&nxt.tagName!=='H4'){if(nxt.style.display!=='none')any=true;nxt=nxt.nextElementSibling;}h.style.display=any?'':'none';});}
