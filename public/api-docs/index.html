@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reseller API Docs — ToolsByDcx</title>
+<style>
+:root{--bg:#0d0b1e;--panel:#171430;--line:#2c2766;--txt:#e8e6f5;--mut:#9d97c9;--acc:#7c5cff;--acc2:#00d4ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:32px 20px 60px}
+h1{font-size:28px;margin:0 0 4px}h1 span{color:var(--acc2)}
+h2{font-size:20px;margin:36px 0 8px;border-bottom:1px solid var(--line);padding-bottom:6px}
+h3{font-size:16px;margin:20px 0 6px}
+p{margin:8px 0}.mut{color:var(--mut)}
+a{color:var(--acc2)}
+code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;background:#1f1b45;padding:2px 6px;border-radius:5px}
+pre{background:#0a0817;border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto;font-size:13px;line-height:1.5}
+pre code{background:none;padding:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+.badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;background:var(--acc);color:#fff}
+.badge.get{background:#0e7490}.badge.post{background:#15803d}
+table{width:100%;border-collapse:collapse}th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line)}th{color:var(--mut);font-size:12px;text-transform:uppercase}
+.warn{background:#451a03;border:1px solid #92400e;border-radius:10px;padding:12px 16px}
+</style>
+</head>
+<body><div class="wrap">
+<h1>🛒 Tools<span>ByDcx</span> Reseller API</h1>
+<p class="mut">Sell our products on your own bot or website. Every order is charged to your wallet points balance and delivered instantly from our stock.</p>
+
+<div class="card">
+<h2 style="margin-top:0;border:0">🔑 Getting your API key</h2>
+<p>Open the bot and tap <b>🔑 Reseller API → Generate API Key</b>. Your key is shown <b>only once</b> — save it immediately. It is linked to your wallet: orders are paid from your points balance, so top up with 💎 Buy Points before you start selling.</p>
+<p>If you lose your key, generate a new one in the bot (the old one stops working). An admin can also deactivate a key at any time.</p>
+</div>
+
+<h2>Authentication</h2>
+<p>Send your key in the <code>X-API-Key</code> header on every request. There is no other auth.</p>
+<pre><code>X-API-Key: YOUR_API_KEY_HERE</code></pre>
+<p>Base URL: <code>https://telegram.toolsbydcx.com/api</code></p>
+
+<h2>Endpoints</h2>
+<table>
+<tr><th>Method</th><th>Endpoint</th><th>What it does</th></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/api/products</code></td><td>List products with price and live stock</td></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/api/categories</code></td><td>List categories</td></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/api/stock?product_id=N</code></td><td>Live stock for one product</td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/api/order</code></td><td>Buy and get the delivery instantly</td></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/api/order/{id}</code></td><td>Order status and delivered items</td></tr>
+</table>
+
+<h2>GET /api/products</h2>
+<p>Lists all active products for the bot your key belongs to, with live available stock.</p>
+<pre><code>curl -H "X-API-Key: YOUR_API_KEY_HERE" \
+  https://telegram.toolsbydcx.com/api/products</code></pre>
+<pre><code>{
+  "products": [
+    {
+      "id": 1,
+      "name": "100M Credit API Codex 5 Days",
+      "price_usd": 5.5,
+      "description": "100M Credit API Codex 5 Days - full warranty.",
+      "delivery_format": "Coupon / Redemption Code",
+      "category": "Chatgpt",
+      "category_id": 1,
+      "stock": 12,
+      "sold_count": 1,
+      "status": "active"
+    }
+  ]
+}</code></pre>
+
+<h2>GET /api/categories</h2>
+<pre><code>curl -H "X-API-Key: YOUR_API_KEY_HERE" \
+  https://telegram.toolsbydcx.com/api/categories</code></pre>
+<pre><code>{
+  "categories": [
+    { "id": 1, "name": "Chatgpt", "slug": "chatgpt", "emoji": "📁", "product_count": 14 },
+    { "id": 6, "name": "Netflix", "slug": "netflix", "emoji": "📁", "product_count": 1 }
+  ]
+}</code></pre>
+
+<h2>GET /api/stock</h2>
+<p>Check live stock before ordering. <code>product_id</code> is required.</p>
+<pre><code>curl -H "X-API-Key: YOUR_API_KEY_HERE" \
+  "https://telegram.toolsbydcx.com/api/stock?product_id=1"</code></pre>
+<pre><code>{
+  "product_id": 1,
+  "name": "100M Credit API Codex 5 Days",
+  "price_usd": 5.5,
+  "status": "active",
+  "stock": 12
+}</code></pre>
+
+<h2>POST /api/order</h2>
+<p>Buys <code>qty</code> of a product, charges your wallet <code>total_usd × points_rate</code> points ($1 = 10 points by default), and delivers instantly. <code>qty</code> must be 1–100.</p>
+<pre><code>curl -X POST -H "X-API-Key: YOUR_API_KEY_HERE" \
+  -H "Content-Type: application/json" \
+  -d '{"product_id": 1, "qty": 2}' \
+  https://telegram.toolsbydcx.com/api/order</code></pre>
+<h3>Response (qty ≤ 9 — contents inline)</h3>
+<pre><code>{
+  "order_id": 42,
+  "product_id": 1,
+  "product": "100M Credit API Codex 5 Days",
+  "qty": 2,
+  "total_usd": 11.0,
+  "points_charged": 110.0,
+  "status": "delivered",
+  "contents": [
+    "CODEX-XXXX-1111",
+    "CODEX-XXXX-2222"
+  ]
+}</code></pre>
+<h3>Response (qty &gt; 9 — file via Telegram)</h3>
+<p>For 10 or more items the contents are not returned inline. Instead the delivery file is sent to you on Telegram by the bot, and the response says so:</p>
+<pre><code>{
+  "order_id": 43,
+  "product_id": 1,
+  "product": "100M Credit API Codex 5 Days",
+  "qty": 10,
+  "total_usd": 55.0,
+  "points_charged": 550.0,
+  "status": "delivered",
+  "contents": null,
+  "note": "10+ items: the delivery file was sent to you on Telegram."
+}</code></pre>
+<div class="warn"><b>⚠️ Treat delivered contents as secret.</b> Each code/account is sold once — do not share or resell the same item twice. If a code does not work, open a warranty claim in the bot with the order ID.</div>
+
+<h2>GET /api/order/{id}</h2>
+<p>Check an order you placed (only your own orders are visible).</p>
+<pre><code>curl -H "X-API-Key: YOUR_API_KEY_HERE" \
+  https://telegram.toolsbydcx.com/api/order/42</code></pre>
+<pre><code>{
+  "order_id": 42,
+  "product_id": 1,
+  "product": "100M Credit API Codex 5 Days",
+  "qty": 2,
+  "unit_price": 5.5,
+  "total_usd": 11.0,
+  "status": "delivered",
+  "payment_method": "points",
+  "created_at": "2026-11-06 02:10:00",
+  "delivered_at": "2026-11-06 02:10:00",
+  "items": ["CODEX-XXXX-1111", "CODEX-XXXX-2222"]
+}</code></pre>
+
+<h2>Errors</h2>
+<p>Errors are always JSON <code>{"error": "..."}</code> with an HTTP status code:</p>
+<table>
+<tr><th>Code</th><th>Meaning</th></tr>
+<tr><td><code>400</code></td><td>Bad input — missing/invalid product_id, qty out of range, or invalid JSON.</td></tr>
+<tr><td><code>401</code></td><td>Missing, invalid, deactivated, or banned API key.</td></tr>
+<tr><td><code>402</code></td><td>Insufficient points — top up your wallet in the bot and retry. Nothing was charged.</td></tr>
+<tr><td><code>404</code></td><td>Product, order, or endpoint not found (orders only return your own).</td></tr>
+<tr><td><code>409</code></td><td>Out of stock — the product is out of stock or has fewer items than the qty requested. If points were charged, they are refunded automatically.</td></tr>
+</table>
+
+<h2>Tips</h2>
+<ul>
+<li>Call <code>GET /api/stock</code> before a big order — stock changes as other resellers buy.</li>
+<li>Keep your key secret. Anyone with it can spend your wallet balance.</li>
+<li>Need help? Open a support ticket in the bot and include the order ID.</li>
+</ul>
+<p class="mut">ToolsByDcx Reseller API · Docs served from <code>/api-docs</code></p>
+</div></body></html>
