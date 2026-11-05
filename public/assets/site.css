@@ -188,6 +188,22 @@ h2.cat{margin:30px 0 12px;font-size:20px;border-bottom:1px solid var(--line);pad
 .cta-banner .btn{background:#fff;color:var(--acc)}
 .cta-banner .btn:hover{background:#fff1e8}
 
+/* ---------- API docs ---------- */
+.docs{max-width:860px;margin:0 auto;padding:0 20px 60px}
+.docs .nav a{margin-left:16px;color:var(--mut);font-weight:600}
+.docs .nav a:hover{color:var(--acc)}
+.docs header{display:flex;align-items:center;justify-content:space-between;padding:18px 0;flex-wrap:wrap;gap:12px;position:sticky;top:0;background:var(--bg);z-index:100;border-bottom:1px solid transparent}
+.docs h1{font-size:28px;margin:0 0 4px}
+.docs h2{font-size:20px;margin:36px 0 8px;border-bottom:1px solid var(--line);padding-bottom:6px}
+.docs h3{font-size:16px;margin:20px 0 6px}
+.docs p{margin:8px 0}
+.docs code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;background:#f3f4f6;padding:2px 6px;border-radius:5px}
+.docs pre code{background:none;padding:0}
+.docs .card{margin:14px 0}
+.badge.get{background:#cffafe;color:#155e75}
+.badge.post{background:var(--ok-soft);color:#166534}
+.docs .warn{background:var(--warn-soft);border:1px solid #fcd34d;border-radius:10px;padding:12px 16px;color:#92400e}
+
 /* ---------- Back to top ---------- */
 .back-to-top{position:fixed;right:22px;bottom:22px;width:50px;height:50px;border-radius:50%;background:var(--acc);color:#fff;border:0;cursor:pointer;font-size:22px;font-weight:700;box-shadow:0 6px 18px rgba(255,102,34,.45);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .25s ease,transform .25s ease,visibility .25s;z-index:9999;display:flex;align-items:center;justify-content:center}
 .back-to-top.show{opacity:1;visibility:visible;pointer-events:auto}
