@@ -58,5 +58,16 @@ function inline_kb(array $rows): array { return ['inline_keyboard' => $rows]; }
 function reply_kb(array $rows, bool $resize = true): array {
     return ['keyboard' => $rows, 'resize_keyboard' => $resize, 'is_persistent' => true];
 }
-function btn(string $text, string $cb): array { return ['text' => $text, 'callback_data' => $cb]; }
+function btn(string $text, string $cb, ?string $style = null): array {
+    $b = ['text' => $text, 'callback_data' => $cb];
+    // Bot API 9.4 button styles: 'primary' (blue), 'success' (green), 'danger' (red).
+    // Only sent when given; older clients (pre Feb 2026) ignore it and show default.
+    if ($style !== null) $b['style'] = $style;
+    return $b;
+}
+function btn_kb(string $text, ?string $style = null): array {
+    $b = ['text' => $text];
+    if ($style !== null) $b['style'] = $style;
+    return $b;
+}
 function btn_url(string $text, string $url): array { return ['text' => $text, 'url' => $url]; }

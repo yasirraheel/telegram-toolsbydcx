@@ -66,20 +66,22 @@ class Bot {
     // ---------- keyboards ----------
     private function mainMenuKb(): array {
         $i = $this->i;
+        // Button colours copied from the original bot (Bot API 9.4 styles):
+        // primary = blue, success = green.
         return inline_kb([
-            [btn($i->t('btn_shop'), 'm:shop')],
-            [btn($i->t('btn_points'), 'm:points'), btn($i->t('btn_price'), 'm:price')],
-            [btn($i->t('btn_account'), 'm:acct'), btn($i->t('btn_orders'), 'm:orders'), btn($i->t('btn_txns'), 'm:txns')],
-            [btn($i->t('btn_loyalty'), 'm:loyal'), btn($i->t('btn_refer'), 'm:refer')],
-            [btn($i->t('btn_support'), 'm:support'), btn($i->t('btn_warranty'), 'm:war'), btn($i->t('btn_reviews'), 'm:rev')],
-            [btn($i->t('btn_language'), 'm:lang')],
+            [btn($i->t('btn_shop'), 'm:shop', 'primary')],
+            [btn($i->t('btn_points'), 'm:points', 'primary'), btn($i->t('btn_price'), 'm:price', 'primary')],
+            [btn($i->t('btn_account'), 'm:acct', 'success'), btn($i->t('btn_orders'), 'm:orders', 'primary'), btn($i->t('btn_txns'), 'm:txns', 'success')],
+            [btn($i->t('btn_loyalty'), 'm:loyal', 'primary'), btn($i->t('btn_refer'), 'm:refer', 'primary')],
+            [btn($i->t('btn_support'), 'm:support', 'success'), btn($i->t('btn_warranty'), 'm:war', 'primary'), btn($i->t('btn_reviews'), 'm:rev', 'success')],
+            [btn($i->t('btn_language'), 'm:lang', 'primary')],
         ]);
     }
     private function replyKb(): array {
         $i = $this->i;
         return reply_kb([
-            [$i->t('btn_menu'), $i->t('btn_api')],
-            [$i->t('btn_freebies'), $i->t('btn_howto')],
+            [btn_kb($i->t('btn_menu'), 'success'), btn_kb($i->t('btn_api'), 'success')],
+            [btn_kb($i->t('btn_freebies'), 'success'), btn_kb($i->t('btn_howto'), 'primary')],
         ]);
     }
     private function backHomeKb(): array {
