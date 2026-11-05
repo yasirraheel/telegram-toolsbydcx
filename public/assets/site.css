@@ -96,9 +96,9 @@ tbody tr:hover{background:#fafafa}
 .box .mut{margin:0 0 16px}
 
 /* ---------- Sticky headers ---------- */
-.store header{position:sticky;top:0;background:var(--bg);z-index:100;padding:14px 0;border-bottom:1px solid transparent}
-.store header.stuck{border-bottom-color:var(--line);box-shadow:0 2px 10px rgba(0,0,0,.05)}
-.top{position:sticky;top:0;background:var(--bg);z-index:90;padding:16px 0}
+.store header{position:sticky;top:0;background:#fff;z-index:100;margin:0 -18px;padding:14px 18px;border-bottom:1px solid var(--line);box-shadow:0 2px 10px rgba(0,0,0,.06)}
+.store header.stuck{border-bottom-color:var(--line);box-shadow:0 2px 10px rgba(0,0,0,.06)}
+.top{position:sticky;top:0;background:#fff;z-index:90;margin:0 -24px 18px;padding:16px 24px;border-bottom:1px solid var(--line);box-shadow:0 2px 10px rgba(0,0,0,.06)}
 
 /* ---------- Public storefront ---------- */
 .store{max-width:1020px;margin:0 auto;padding:0 18px 60px}
@@ -192,7 +192,7 @@ h2.cat{margin:30px 0 12px;font-size:20px;border-bottom:1px solid var(--line);pad
 .docs{max-width:860px;margin:0 auto;padding:0 20px 60px}
 .docs .nav a{margin-left:16px;color:var(--mut);font-weight:600}
 .docs .nav a:hover{color:var(--acc)}
-.docs header{display:flex;align-items:center;justify-content:space-between;padding:18px 0;flex-wrap:wrap;gap:12px;position:sticky;top:0;background:var(--bg);z-index:100;border-bottom:1px solid transparent}
+.docs header{display:flex;align-items:center;justify-content:space-between;padding:18px 0;flex-wrap:wrap;gap:12px;position:sticky;top:0;background:#fff;z-index:100;border-bottom:1px solid var(--line);box-shadow:0 2px 10px rgba(0,0,0,.06)}
 .docs h1{font-size:28px;margin:0 0 4px}
 .docs h2{font-size:20px;margin:36px 0 8px;border-bottom:1px solid var(--line);padding-bottom:6px}
 .docs h3{font-size:16px;margin:20px 0 6px}

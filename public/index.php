@@ -63,7 +63,7 @@ if ($botId) {
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-<link rel="stylesheet" href="assets/site.css?v=4"></head>
+<link rel="stylesheet" href="assets/site.css?v=5"></head>
 <body><div class="store">
 <header>
 <a class="logo" href="/" title="Home">🛒 Tools<span>ByDcx</span></a>

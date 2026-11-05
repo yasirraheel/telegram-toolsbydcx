@@ -23,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32.png">
 <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
-<link rel="stylesheet" href="../assets/site.css?v=4"></head><body class="login-wrap">
+<link rel="stylesheet" href="../assets/site.css?v=5"></head><body class="login-wrap">
 <div class="box"><h1><a href="../" title="Home" style="color:#1f2937;text-decoration:none">🛒 Tools<span style="color:#ff6622">ByDcx</span> Admin</a></h1><p class="mut">Sign in to manage your Telegram store bots.</p>
 <?php foreach (take_flash() as $f): ?><div class="flash"><?= esc($f['msg']) ?></div><?php endforeach; ?>
 <form method="post" action="index.php?page=login">
