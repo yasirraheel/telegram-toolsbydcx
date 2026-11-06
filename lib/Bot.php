@@ -292,9 +292,12 @@ class Bot {
     // and the keyboard is refreshed only if older than 15 minutes.
     private function showReplyKbHidden(): void {
         $d = $this->stateData();
-        $lastKb = (int)($d['kb_sent_at'] ?? 0);
-        if ($lastKb !== 0 && time() - $lastKb < 900) return;
         $oldKb = (int)($d['kb_msg_id'] ?? 0);
+        $lastKb = (int)($d['kb_sent_at'] ?? 0);
+        // Only skip re-sending when a carrier actually exists and is fresh.
+        // When kb_msg_id is 0 there is no carrier (and no keyboard), so a
+        // fresh one must be sent even inside the 15-minute window.
+        if ($oldKb > 0 && $lastKb !== 0 && time() - $lastKb < 900) return;
         if ($oldKb > 0) tg_delete($this->token, $this->chatId, $oldKb);
         $res = tg_send($this->token, $this->chatId, '🏠', $this->replyKb());
         if ($res['ok'] ?? false) {
