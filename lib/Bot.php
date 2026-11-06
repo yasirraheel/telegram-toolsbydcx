@@ -376,14 +376,13 @@ class Bot {
             $pdo->prepare("INSERT INTO ticket_messages (ticket_id, sender, message) VALUES (?, 'user', ?)")
                 ->execute([$tid, $text]);
             $this->setState('');
-            // Issue 40: the 3 step prompts are deleted so the ticket flow
-            // leaves no clutter; the main menu comes back. The user's 3
-            // replies are already deleted by issue 34. The confirmation
-            // stays so the user sees the ticket number.
+            // Issue 40 (v2): the whole ticket chat must end clean — delete
+            // the 3 step prompts AND the confirmation, so only the main
+            // menu is left. The user's 3 replies are already deleted by
+            // issue 34. The ticket number is visible in My Tickets.
             foreach (($data['tic_msgs'] ?? []) as $mid) {
                 tg_delete($this->token, $this->chatId, (int)$mid);
             }
-            tg_send($this->token, $this->chatId, "✅ Ticket #{$tid} created! Our team will reply within 24-48 hours.");
             $this->sendWelcome();
             return true;
         }
