@@ -190,7 +190,7 @@ class Bot {
         if ($arg !== '' && is_numeric($arg)) {
             $this->handleReferral((int)$arg);
         }
-        $this->sendWelcome();
+        $this->sendWelcome(true);
     }
 
     private function handleReferral(int $referrerTgId): void {
@@ -213,14 +213,19 @@ class Bot {
             "🔐 Verification: to activate your referral, please answer: What is {$a} + {$b}?");
     }
 
-    private function sendWelcome(): void {
+    private function sendWelcome(bool $fresh = false): void {
         // Edit the tracked menu message in place when it is the banner, so
         // repeated Menu / /start taps never stack fresh banners below.
         // Only send a fresh banner when there is no tracked message or it
         // can no longer be edited (deleted / too old).
+        // Issue 33: /start always sends a FRESH banner. The tracked message
+        // can sit in old history the client no longer loads (after the user
+        // clears the chat), so editing it succeeds ("not modified") yet the
+        // user sees nothing and thinks the bot is dead. A fresh /start must
+        // appear at the bottom of the chat, visibly.
         $m = $this->menuMsg();
         $caption = $this->i->t('welcome_caption', ['user_id' => $this->user['telegram_id']]);
-        if ($m['id'] > 0 && $m['media']) {
+        if (!$fresh && $m['id'] > 0 && $m['media']) {
             $res = tg_edit_caption($this->token, $this->chatId, $m['id'], $caption, $this->mainMenuKb());
             if ($res['ok'] ?? false) {
                 $this->menuTrack((int)($res['result']['message_id'] ?? $m['id']), !empty($res['_fallback_text']) ? false : true);
