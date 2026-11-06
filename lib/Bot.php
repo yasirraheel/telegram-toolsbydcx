@@ -130,6 +130,13 @@ class Bot {
             [btn($i->t('btn_freebies'), 'm:freebies', 'success'), btn($i->t('btn_api'), 'm:api', 'success'), btn($i->t('btn_howto'), 'm:howto', 'primary')],
         ]);
     }
+    private function replyKb(): array {
+        $i = $this->i;
+        return reply_kb([
+            [btn_kb($i->t('btn_menu'), 'success'), btn_kb($i->t('btn_api'), 'success')],
+            [btn_kb($i->t('btn_freebies'), 'success'), btn_kb($i->t('btn_howto'), 'primary')],
+        ]);
+    }
     // Button colours copied from the original bot (Bot API 9.4 styles):
     // primary = blue, success = green, danger = red. Grids alternate
     // blue/green so no button is left in Telegram's default dark style.
@@ -235,11 +242,11 @@ class Bot {
             $res = tg_edit_caption($this->token, $this->chatId, $m['id'], $caption, $this->mainMenuKb());
             if ($res['ok'] ?? false) {
                 $this->menuTrack((int)($res['result']['message_id'] ?? $m['id']), !empty($res['_fallback_text']) ? false : true);
-                $this->dropReplyKb();
+                $this->showReplyKbHidden();
                 return;
             }
             if (str_contains((string)($res['description'] ?? ''), 'message is not modified')) {
-                $this->dropReplyKb();
+                $this->showReplyKbHidden();
                 return;
             }
         }
@@ -261,7 +268,7 @@ class Bot {
             $res = tg_animation($this->token, $this->chatId, $base . '/assets/banner.gif', $caption, $this->mainMenuKb());
         }
         if ($res['ok'] ?? false) $this->menuTrack((int)$res['result']['message_id'], true);
-        $this->dropReplyKb();
+        $this->showReplyKbHidden();
     }
 
     // (Re)send the persistent reply keyboard's carrier message when
@@ -276,16 +283,33 @@ class Bot {
     // removed. Freebies / Reseller API / How to Use now live on the banner's
     // inline menu instead. This only deletes the old carrier message (if any)
     // and clears the keyboard state; it never sends a new carrier.
-    private function dropReplyKb(): void {
+    // Issue 37: the bottom reply keyboard (Menu / Reseller API / Freebies /
+    // How to Use) must come back, but WITHOUT the "👇 🏠 Menu" carrier bubble
+    // the user wants gone. Fix: send the carrier with the reply keyboard,
+    // then delete the carrier message at once. The keyboard is a chat-level
+    // UI element in Telegram: deleting the carrier removes the bubble, but
+    // the keyboard stays visible (this is how the original bot shows bottom
+    // buttons with no carrier bubble). A short pause lets the client register
+    // the keyboard before the delete arrives. The old carrier (if any) is
+    // deleted first, and kb_msg_id is cleared so we never try to delete the
+    // already-gone carrier again.
+    private function showReplyKbHidden(): void {
         $d = $this->stateData();
+        $lastKb = (int)($d['kb_sent_at'] ?? 0);
+        if ($lastKb !== 0 && time() - $lastKb < 900) return;
         $oldKb = (int)($d['kb_msg_id'] ?? 0);
         if ($oldKb > 0) tg_delete($this->token, $this->chatId, $oldKb);
-        $d['kb_msg_id'] = 0;
-        $d['kb_sent'] = 0;
-        $d['kb_sent_at'] = 0;
-        db()->prepare("UPDATE users SET state_data=? WHERE id=?")
-            ->execute([json_encode($d), $this->user['id']]);
-        $this->user['state_data'] = json_encode($d);
+        $res = tg_send($this->token, $this->chatId, '👇 ' . $this->i->t('btn_menu'), $this->replyKb());
+        if ($res['ok'] ?? false) {
+            sleep(1);
+            tg_delete($this->token, $this->chatId, (int)$res['result']['message_id']);
+            $d['kb_msg_id'] = 0;
+            $d['kb_sent_at'] = time();
+            $d['kb_sent'] = 1;
+            db()->prepare("UPDATE users SET state_data=? WHERE id=?")
+                ->execute([json_encode($d), $this->user['id']]);
+            $this->user['state_data'] = json_encode($d);
+        }
     }
 
     // ---------- state machine ----------
