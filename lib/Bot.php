@@ -27,18 +27,7 @@ class Bot {
             $this->onSuccessfulPayment($update['message']); return;
         }
         if (isset($update['callback_query'])) { $this->onCallback($update['callback_query']); return; }
-        if (isset($update['message'])) {
-            $m = $update['message'];
-            $this->onMessage($m);
-            // Keep the chat clean like the original: once the bot has
-            // answered, the user's own tap/command text disappears, so only
-            // the bot's single screen message remains and nothing stacks
-            // up below. Bots may delete incoming messages in private chats;
-            // a failure here is harmless and ignored.
-            if (isset($m['text']) && isset($m['message_id'])) {
-                tg_delete($this->token, (int)$m['chat']['id'], (int)$m['message_id']);
-            }
-        }
+        if (isset($update['message'])) { $this->onMessage($update['message']); }
     }
 
     // ---------- users ----------
@@ -235,9 +224,13 @@ class Bot {
             $res = tg_edit_caption($this->token, $this->chatId, $m['id'], $caption, $this->mainMenuKb());
             if ($res['ok'] ?? false) {
                 $this->menuTrack((int)($res['result']['message_id'] ?? $m['id']), !empty($res['_fallback_text']) ? false : true);
+                $this->refreshReplyKb();
                 return;
             }
-            if (str_contains((string)($res['description'] ?? ''), 'message is not modified')) return;
+            if (str_contains((string)($res['description'] ?? ''), 'message is not modified')) {
+                $this->refreshReplyKb();
+                return;
+            }
         }
         if ($m['id'] > 0) {
             tg_api($this->token, 'deleteMessage', ['chat_id' => $this->chatId, 'message_id' => $m['id']]);
@@ -252,26 +245,30 @@ class Bot {
             $res = tg_photo($this->token, $this->chatId, $base . '/assets/banner.png', $caption, $this->mainMenuKb());
         }
         if ($res['ok'] ?? false) $this->menuTrack((int)$res['result']['message_id'], true);
-        // The persistent reply keyboard must stay visible on every device.
-        // It is (re)sent when needed: the first time, or when the last
-        // carrier is older than 15 minutes — mobile clients can lose the
-        // keyboard when it is dismissed or the app restarts, and the bot
-        // must be able to bring it back. The old carrier is deleted
-        // first, so there is still exactly one carrier message.
+        $this->refreshReplyKb();
+    }
+
+    // (Re)send the persistent reply keyboard's carrier message when
+    // needed: the first time, or when the last carrier is older than 15
+    // minutes — mobile clients can lose the keyboard when it is dismissed
+    // or the app restarts, and the bot must be able to bring it back.
+    // The old carrier is deleted first, so there is still exactly one
+    // carrier message. Called on EVERY welcome path (including the
+    // already-showing one): an early return above must never skip it.
+    private function refreshReplyKb(): void {
         $d = $this->stateData();
         $lastKb = (int)($d['kb_sent_at'] ?? 0);
-        if ($lastKb === 0 || time() - $lastKb >= 900) {
-            $oldKb = (int)($d['kb_msg_id'] ?? 0);
-            if ($oldKb > 0) tg_delete($this->token, $this->chatId, $oldKb);
-            $res = tg_send($this->token, $this->chatId, '👇 ' . $this->i->t('btn_menu'), $this->replyKb());
-            if ($res['ok'] ?? false) {
-                $d['kb_msg_id'] = (int)$res['result']['message_id'];
-                $d['kb_sent_at'] = time();
-                $d['kb_sent'] = 1;
-                db()->prepare("UPDATE users SET state_data=? WHERE id=?")
-                    ->execute([json_encode($d), $this->user['id']]);
-                $this->user['state_data'] = json_encode($d);
-            }
+        if ($lastKb !== 0 && time() - $lastKb < 900) return;
+        $oldKb = (int)($d['kb_msg_id'] ?? 0);
+        if ($oldKb > 0) tg_delete($this->token, $this->chatId, $oldKb);
+        $res = tg_send($this->token, $this->chatId, '👇 ' . $this->i->t('btn_menu'), $this->replyKb());
+        if ($res['ok'] ?? false) {
+            $d['kb_msg_id'] = (int)$res['result']['message_id'];
+            $d['kb_sent_at'] = time();
+            $d['kb_sent'] = 1;
+            db()->prepare("UPDATE users SET state_data=? WHERE id=?")
+                ->execute([json_encode($d), $this->user['id']]);
+            $this->user['state_data'] = json_encode($d);
         }
     }
 

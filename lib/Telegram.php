@@ -82,20 +82,26 @@ function inline_kb(array $rows): array { return ['inline_keyboard' => $rows]; }
 function reply_kb(array $rows, bool $resize = true): array {
     return ['keyboard' => $rows, 'resize_keyboard' => $resize, 'is_persistent' => true];
 }
-function btn(string $text, string $cb, ?string $style = null): array {
+function btn(string $text, string $cb, ?string $style = null, ?string $icon = null): array {
     $b = ['text' => $text, 'callback_data' => $cb];
     // Bot API 9.4 button styles: 'primary' (blue), 'success' (green), 'danger' (red).
     // Only sent when given; older clients (pre Feb 2026) ignore it and show default.
     if ($style !== null) $b['style'] = $style;
+    // Bot API 9.4: animated custom emoji shown before the button text.
+    // Needs the bot owner to have Telegram Premium (or a Fragment
+    // username); otherwise Telegram ignores it and shows plain text.
+    if ($icon !== null) $b['icon_custom_emoji_id'] = $icon;
     return $b;
 }
-function btn_kb(string $text, ?string $style = null): array {
+function btn_kb(string $text, ?string $style = null, ?string $icon = null): array {
     $b = ['text' => $text];
     if ($style !== null) $b['style'] = $style;
+    if ($icon !== null) $b['icon_custom_emoji_id'] = $icon;
     return $b;
 }
-function btn_url(string $text, string $url, ?string $style = null): array {
+function btn_url(string $text, string $url, ?string $style = null, ?string $icon = null): array {
     $b = ['text' => $text, 'url' => $url];
     if ($style !== null) $b['style'] = $style;
+    if ($icon !== null) $b['icon_custom_emoji_id'] = $icon;
     return $b;
 }
