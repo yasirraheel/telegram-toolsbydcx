@@ -107,6 +107,16 @@ $binanceDetails = [];
 foreach ($rows as $r) {
     if ($r['code'] === 'binance') { $binanceDetails = json_decode((string)$r['details'], true) ?: []; break; }
 }
+$binanceSecretHint = '';
+if (!empty($binanceDetails['api_secret_enc'])) {
+    $savedSecret = dec_token((string)$binanceDetails['api_secret_enc']);
+    $savedLength = strlen($savedSecret);
+    if ($savedLength >= 9) {
+        $binanceSecretHint = substr($savedSecret, 0, 4) . '••••••••' . substr($savedSecret, -4);
+    } elseif ($savedLength > 0) {
+        $binanceSecretHint = substr($savedSecret, 0, 2) . '••••' . substr($savedSecret, -2);
+    }
+}
 
 admin_head('Payment Methods', 'payments', $botId, $bots);
 
@@ -140,7 +150,7 @@ $walletOf = function (string $code, string $key) use ($rows): string {
 <input type="text" name="binance_api_key" value="<?= esc($binanceDetails['api_key'] ?? '') ?>" autocomplete="off" placeholder="Binance API Key" required>
 <label>API secret key</label>
 <input type="password" name="binance_api_secret" value="" autocomplete="new-password" placeholder="<?= !empty($binanceDetails['api_secret_enc']) ? '••••••••••••••••  Saved securely — blank chhorain' : 'Paste API secret key' ?>">
-<?php if (!empty($binanceDetails['api_secret_enc'])): ?><small class="mut">✅ API secret save hai. Is field ko blank chhorain; sirf nayi secret key set ya rotate karni ho to paste karein.</small><?php endif; ?>
+<?php if (!empty($binanceDetails['api_secret_enc'])): ?><small class="mut">✅ API secret save hai: <code><?= esc($binanceSecretHint ?: '••••••••') ?></code><br>Field blank chhorain; sirf nayi secret key set ya rotate karni ho to paste karein.</small><?php endif; ?>
 <label>Binance Pay UID — auto verification ke liye required</label>
 <input type="text" name="binance_uid" value="<?= esc($binanceDetails['uid'] ?? '') ?>" inputmode="numeric" placeholder="e.g. 123456789" required>
 <label>Receive currency</label>
