@@ -238,11 +238,16 @@ class Bot {
         $cfg = load_config();
         $base = rtrim($cfg['base_url'], '/');
         // Animated GIF banner when present (like the original), else static PNG.
+        // Uploaded as bytes: passing a URL made Telegram fetch the file from
+        // our server, which was the slowest step of /start.
         $gifOnDisk = dirname(__DIR__) . '/public/assets/banner.gif';
+        $pngOnDisk = dirname(__DIR__) . '/public/assets/banner.png';
         if (is_file($gifOnDisk)) {
-            $res = tg_animation($this->token, $this->chatId, $base . '/assets/banner.gif', $caption, $this->mainMenuKb());
+            $res = tg_animation_file($this->token, $this->chatId, $gifOnDisk, $caption, $this->mainMenuKb());
+        } elseif (is_file($pngOnDisk)) {
+            $res = tg_photo_file($this->token, $this->chatId, $pngOnDisk, $caption, $this->mainMenuKb());
         } else {
-            $res = tg_photo($this->token, $this->chatId, $base . '/assets/banner.png', $caption, $this->mainMenuKb());
+            $res = tg_animation($this->token, $this->chatId, $base . '/assets/banner.gif', $caption, $this->mainMenuKb());
         }
         if ($res['ok'] ?? false) $this->menuTrack((int)$res['result']['message_id'], true);
         $this->refreshReplyKb();

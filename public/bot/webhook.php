@@ -19,10 +19,22 @@ $raw = file_get_contents('php://input');
 $update = json_decode($raw ?: '{}', true);
 if (!is_array($update)) { http_response_code(200); exit('ok'); }
 
+// Answer Telegram immediately, BEFORE doing the work. Telegram waits for
+// the 200 before delivering the next update, so when a reply was slow,
+// every later tap queued up behind it — and Telegram retried the slow
+// one, doubling the load. The bot's replies are still sent by handle()
+// below; only the acknowledgement is early.
+http_response_code(200);
+echo 'ok';
+if (function_exists('fastcgi_finish_request')) {
+    fastcgi_finish_request();
+} else {
+    if (ob_get_level() > 0) { @ob_flush(); }
+    @flush();
+}
+
 try {
     (new Bot($bot))->handle($update);
 } catch (Throwable $e) {
     error_log('webhook error bot ' . $botId . ': ' . $e->getMessage());
 }
-http_response_code(200);
-echo 'ok';

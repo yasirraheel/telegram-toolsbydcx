@@ -6,15 +6,21 @@ function tg_api(string $token, string $method, array $params = []): array {
         $GLOBALS['TG_CALLS'][] = ['method' => $method, 'params' => $params];
         return ['ok' => true, 'result' => ['message_id' => count($GLOBALS['TG_CALLS'])]];
     }
-    $ch = curl_init("https://api.telegram.org/bot{$token}/{$method}");
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => $params,
-        CURLOPT_TIMEOUT => 30,
-    ]);
+    // Reuse one curl handle per request so the TLS connection to
+    // api.telegram.org stays alive across the several API calls of a
+    // single update (no fresh DNS lookup + handshake per call).
+    static $ch = null;
+    if ($ch === null) {
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_TIMEOUT => 30,
+        ]);
+    }
+    curl_setopt($ch, CURLOPT_URL, "https://api.telegram.org/bot{$token}/{$method}");
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
     $out = curl_exec($ch);
-    curl_close($ch);
     $dec = json_decode((string)$out, true);
     return is_array($dec) ? $dec : ['ok' => false, 'error' => 'bad response'];
 }
@@ -69,6 +75,20 @@ function tg_animation(string $token, int $chatId, string $animation, string $cap
     $p = ['chat_id' => $chatId, 'animation' => $animation, 'caption' => $caption, 'parse_mode' => 'HTML'];
     if ($markup) $p['reply_markup'] = json_encode($markup);
     return tg_api($token, 'sendAnimation', $p);
+}
+// Upload the animation bytes instead of passing a URL: Telegram then does
+// not have to fetch the file from our server (that fetch was the slowest
+// step of /start).
+function tg_animation_file(string $token, int $chatId, string $path, string $caption, $markup = null): array {
+    $p = ['chat_id' => $chatId, 'animation' => new CURLFile($path, 'image/gif'), 'caption' => $caption, 'parse_mode' => 'HTML'];
+    if ($markup) $p['reply_markup'] = json_encode($markup);
+    return tg_api($token, 'sendAnimation', $p);
+}
+// Same upload-first approach for the static banner fallback.
+function tg_photo_file(string $token, int $chatId, string $path, string $caption, $markup = null): array {
+    $p = ['chat_id' => $chatId, 'photo' => new CURLFile($path, 'image/png'), 'caption' => $caption, 'parse_mode' => 'HTML'];
+    if ($markup) $p['reply_markup'] = json_encode($markup);
+    return tg_api($token, 'sendPhoto', $p);
 }
 function tg_document(string $token, int $chatId, string $path, string $caption = ''): array {
     if (!empty($GLOBALS['TG_TEST_MODE'])) {
