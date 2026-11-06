@@ -505,19 +505,16 @@ class Bot {
         return 'TDCX' . (int)$this->bot['id'] . ($type === 'd' ? 'D' : 'O') . $id;
     }
 
-    // The personal C2C receive-link flow does NOT work with an API key:
-    // Binance's own docs say a 3rd-party collection request uses OAuth
-    // authentication and needs an OAuth client set up with Binance
-    // Merchant Operations — the /binancepay/openapi/user/c2c/createReceive
-    // endpoint is not a documented API-key endpoint, so Binance rejects
-    // the signed API-key request and no shareLink comes back (that is the
-    // "receive link could not be created" error). So the bot always uses
-    // the documented merchant Create Order flow instead
-    // (/binancepay/openapi/v3/order), which works with a Binance Pay
-    // merchant API key. The personal Pay history check is still used for
-    // verification where it applies.
+    // Personal Binance Pay: the store owner's personal account (API key +
+    // secret + UID). A personal API key CANNOT create a receive link or a
+    // merchant order via the API — the C2C receive endpoint needs OAuth
+    // and the merchant order endpoint needs a merchant key — so the bot
+    // does not try to create a payment link. Instead it shows the owner's
+    // Binance Pay UID and the exact amount, the customer sends it manually
+    // in the Binance app, and the bot verifies the payment automatically
+    // from the Pay transaction history (findIncomingPayment).
     private function binancePersonal(array $details): bool {
-        return false;
+        return true;
     }
 
     private function trustedBinancePayLink(string $url): bool {
@@ -540,21 +537,20 @@ class Bot {
             return;
         }
         if ($this->binancePersonal($details)) {
-            $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
-            $res = BinancePay::createReceive($details, $total, $currency, 'Order #' . $oid);
-            $data = is_array($res['data'] ?? null) ? $res['data'] : [];
-            $url = (string)($data['shareLink'] ?? '');
-            if (($res['status'] ?? '') !== 'SUCCESS' || !$this->trustedBinancePayLink($url)) {
-                error_log('Binance personal receive link failed: ' . json_encode(['code' => $res['code'] ?? '', 'message' => $res['errorMessage'] ?? $res['error'] ?? 'unknown']));
+            // Personal account: no API-created link is possible (the C2C
+            // receive endpoint needs OAuth, the merchant order endpoint
+            // needs a merchant key). Show the owner's Binance Pay UID and
+            // the exact amount; the customer sends it in the Binance app
+            // and the bot verifies it from the Pay history on Check Payment.
+            $uid = trim((string)($details['uid'] ?? ''));
+            if ($uid === '') {
                 $pdo->prepare("UPDATE orders SET status='cancelled' WHERE id=?")->execute([$oid]);
-                $edit('❌ Binance Pay receive link could not be created. Please try again or choose another method.', $this->backHomeKb());
+                $edit('❌ Binance Pay is not configured yet. Please contact the store admin.', $this->backHomeKb());
                 return;
             }
-            $pdo->prepare("UPDATE orders SET binance_pay_link=? WHERE id=?")
-                ->execute([$url, $oid]);
-            $txt = "🟡 Binance Pay\n\nOrder #{$oid}\nAmount: $" . fmt_usd($total) . " {$currency}\n\nOpen the link and complete the payment in Binance. After payment, tap Check Payment. The bot checks your Personal Binance Pay transaction history and delivers automatically when the matching payment is found.";
+            $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
+            $txt = "🟡 Binance Pay\n\nOrder #{$oid}\nAmount: $" . fmt_usd($total) . " {$currency}\n\nSend exactly $" . fmt_usd($total) . " {$currency} to this Binance Pay UID in your Binance app:\n\n<code>{$uid}</code>\n\nAfter sending, tap Check Payment. The bot checks the payment automatically and delivers when the matching payment is found.";
             $kb = inline_kb([
-                [btn_url('🟡 Open Binance Pay', $url, 'success')],
                 [btn('🔍 Check Payment', 'pc:o:' . $oid, 'primary'), btn('❌ Cancel Payment', 'px:o:' . $oid, 'danger')],
             ]);
             $edit($txt, $kb);
@@ -1149,21 +1145,19 @@ class Bot {
                 return;
             }
             if ($this->binancePersonal($details)) {
-                $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
-                $res = BinancePay::createReceive($details, $usd, $currency, 'Deposit #' . $did);
-                $data = is_array($res['data'] ?? null) ? $res['data'] : [];
-                $url = (string)($data['shareLink'] ?? '');
-                if (($res['status'] ?? '') !== 'SUCCESS' || !$this->trustedBinancePayLink($url)) {
-                    error_log('Binance personal deposit receive link failed: ' . json_encode(['code' => $res['code'] ?? '', 'message' => $res['errorMessage'] ?? $res['error'] ?? 'unknown']));
+                // Personal account: no API-created link is possible. Show
+                // the owner's Binance Pay UID and the exact amount; the
+                // customer sends it in the Binance app and the bot verifies
+                // it from the Pay history on Check Payment.
+                $uid = trim((string)($details['uid'] ?? ''));
+                if ($uid === '') {
                     $pdo->prepare("UPDATE deposits SET status='failed' WHERE id=?")->execute([$did]);
-                    $edit('❌ Binance Pay receive link could not be created. Please try again or choose another method.', $this->backHomeKb());
+                    $edit('❌ Binance Pay is not configured yet. Please contact the store admin.', $this->backHomeKb());
                     return;
                 }
-                $pdo->prepare("UPDATE deposits SET binance_pay_link=? WHERE id=?")
-                    ->execute([$url, $did]);
-                $txt = "🟡 Binance Pay\n\nDeposit #{$did}\nAmount: $" . fmt_usd($usd) . " {$currency} → " . fmt_points($points) . " points\n\nComplete the payment through Binance. After payment, tap Check Payment. The bot checks your Personal Binance Pay transaction history and credits points automatically when the matching payment is found.";
+                $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
+                $txt = "🟡 Binance Pay\n\nDeposit #{$did}\nAmount: $" . fmt_usd($usd) . " {$currency} → " . fmt_points($points) . " points\n\nSend exactly $" . fmt_usd($usd) . " {$currency} to this Binance Pay UID in your Binance app:\n\n<code>{$uid}</code>\n\nAfter sending, tap Check Payment. The bot checks the payment automatically and credits your points when the matching payment is found.";
                 $kb = inline_kb([
-                    [btn_url('🟡 Open Binance Pay', $url, 'success')],
                     [btn('🔍 Check Payment', 'pc:d:' . $did, 'primary'), btn('❌ Cancel', 'px:d:' . $did, 'danger')],
                 ]);
                 $edit($txt, $kb);
@@ -1234,9 +1228,11 @@ class Bot {
         $o = $st->fetch();
         if (!$o) { $edit('❌ Payment reference not found.', $this->backHomeKb()); return; }
         $details = $this->paymentDetails('binance');
+        // Personal account: verify from the Pay transaction history. There
+        // is no API-created pay link in personal mode (the customer sends
+        // to the owner's UID), so this must not require binance_pay_link.
         if (($o['method'] ?? $o['payment_method'] ?? '') === 'binance'
-            && $this->binancePersonal($details)
-            && (string)($o['binance_pay_link'] ?? '') !== '') {
+            && $this->binancePersonal($details)) {
             $createdMs = strtotime((string)$o['created_at']) * 1000;
             $startMs = max(0, $createdMs - 120000);
             $endMs = min((int)round(microtime(true) * 1000), $createdMs + (30 * 60 * 1000));
