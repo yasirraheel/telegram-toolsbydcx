@@ -348,38 +348,39 @@ class Bot {
             $this->showDepositMethods($usd);
             return true;
         }
+        // Ticket flow (original bot method): Name -> Product picker -> Issue.
+        // Step 1 asks for the name; Step 2 is a paginated product picker
+        // (or General / Other Inquiry); Step 3 asks for the issue text.
+        // There is no separate subject step — the ticket subject is
+        // "Name — Product". On submit the step messages are deleted and
+        // the main menu returns (clean chat, issue 40).
         if ($state === 'await_support_name') {
             $msgs = $data['tic_msgs'] ?? [];
-            $this->setState('await_support_subject', ['name' => $text, 'tic_msgs' => $msgs]);
-            $r = tg_send($this->token, $this->chatId, '📝 Step 2/3: What is the subject of your ticket?');
+            [$txt, $kb] = $this->ticketPicker(1, $text);
+            $r = tg_send($this->token, $this->chatId, $txt, $kb);
             if ($r['ok'] ?? false) {
                 $msgs[] = (int)$r['result']['message_id'];
-                $this->setState('await_support_subject', ['name' => $text, 'tic_msgs' => $msgs]);
             }
+            $this->setState('await_support_product', ['name' => $text, 'tic_msgs' => $msgs]);
             return true;
         }
-        if ($state === 'await_support_subject') {
+        if ($state === 'await_support_search') {
             $msgs = $data['tic_msgs'] ?? [];
-            $this->setState('await_support_msg', ['name' => $data['name'] ?? '', 'subject' => $text, 'tic_msgs' => $msgs]);
-            $r = tg_send($this->token, $this->chatId, '📝 Step 3/3: Describe your issue in detail.');
-            if ($r['ok'] ?? false) {
-                $msgs[] = (int)$r['result']['message_id'];
-                $this->setState('await_support_msg', ['name' => $data['name'] ?? '', 'subject' => $text, 'tic_msgs' => $msgs]);
-            }
+            $pickerId = (int)end($msgs);
+            [$txt, $kb] = $this->ticketPicker(1, $data['name'] ?? '', $text);
+            if ($pickerId > 0) tg_edit($this->token, $this->chatId, $pickerId, $txt, $kb);
+            $this->setState('await_support_product', ['name' => $data['name'] ?? '', 'tic_msgs' => $msgs, 'query' => $text]);
             return true;
         }
         if ($state === 'await_support_msg') {
             $pdo = db();
+            $product = $data['product'] ?? 'General / Account Inquiry';
             $pdo->prepare("INSERT INTO support_tickets (bot_id, user_id, subject) VALUES (?,?,?)")
-                ->execute([$this->bot['id'], $this->user['id'], ($data['name'] ?? '') . ' — ' . ($data['subject'] ?? '')]);
+                ->execute([$this->bot['id'], $this->user['id'], ($data['name'] ?? '') . ' — ' . $product]);
             $tid = (int)$pdo->lastInsertId();
             $pdo->prepare("INSERT INTO ticket_messages (ticket_id, sender, message) VALUES (?, 'user', ?)")
                 ->execute([$tid, $text]);
             $this->setState('');
-            // Issue 40 (v2): the whole ticket chat must end clean — delete
-            // the 3 step prompts AND the confirmation, so only the main
-            // menu is left. The user's 3 replies are already deleted by
-            // issue 34. The ticket number is visible in My Tickets.
             foreach (($data['tic_msgs'] ?? []) as $mid) {
                 tg_delete($this->token, $this->chatId, (int)$mid);
             }
@@ -648,14 +649,32 @@ class Bot {
             case 'ord': $this->showOrdersCb($edit, $parts[1], (int)($parts[2] ?? 1)); return;
             case 'o': $this->showOrderDetail($edit, (int)$parts[1]); return;
             case 'tic':
-                if (($parts[1] ?? '') === 'new') {
+                $sub = $parts[1] ?? '';
+                if ($sub === 'new') {
                     $this->setState('await_support_name', ['tic_msgs' => []]);
-                    $r = tg_send($this->token, $this->chatId, '📝 Step 1/3: What is your full name / nickname?');
+                    $r = tg_send($this->token, $this->chatId, "🎫 New Support Ticket\n👤 Step 1/3: Please enter your Name:\nPlease send your full name or nickname so our team can address you properly.", inline_kb([[btn('❌ Cancel', 'tic:cancel', 'danger')]]));
                     if ($r['ok'] ?? false) {
                         $d = $this->stateData();
                         $d['tic_msgs'] = [(int)$r['result']['message_id']];
                         $this->setState('await_support_name', $d);
                     }
+                } elseif ($sub === 'prod') {
+                    $this->ticketPickProduct($edit, (int)($parts[2] ?? 0));
+                } elseif ($sub === 'general') {
+                    $this->ticketPickProduct($edit, 0);
+                } elseif ($sub === 'page') {
+                    $this->showTicketProducts($edit, (int)($parts[2] ?? 1));
+                } elseif ($sub === 'search') {
+                    $this->setState('await_support_search', $this->stateData());
+                    $edit("🔍 Search Product\nType a product name to search:", inline_kb([[btn('❌ Cancel', 'tic:cancel', 'danger')]]));
+                } elseif ($sub === 'change') {
+                    $this->setState('await_support_product', $this->stateData());
+                    $this->showTicketProducts($edit, 1);
+                } elseif ($sub === 'cancel') {
+                    $d = $this->stateData();
+                    foreach (($d['tic_msgs'] ?? []) as $mid) tg_delete($this->token, $this->chatId, (int)$mid);
+                    $this->setState('');
+                    $this->sendWelcome();
                 } else { $this->showTickets($edit); }
                 return;
             case 'war': $this->showWarrantyOrders($edit); return;
@@ -1246,6 +1265,70 @@ class Bot {
         $txt = "📋 My Tickets\n";
         foreach ($rows as $t) $txt .= "\n#{$t['id']} — " . esc($t['subject']) . " — {$t['status']}";
         $edit($txt, $this->backHomeKb());
+    }
+
+    // ---------- ticket product picker (original bot method) ----------
+    // Step 2/3 of a support ticket: pick the product the ticket is about.
+    // 8 active products per page, paginated, plus General / Other Inquiry.
+    // Returns [text, keyboard] so it can be sent as a new message or used
+    // to edit the picker message in place.
+    private function ticketPicker(int $page, string $name, string $query = ''): array {
+        $pdo = db();
+        $where = "bot_id=? AND active=1 AND status='active'";
+        $params = [$this->bot['id']];
+        if ($query !== '') { $where .= " AND name LIKE ?"; $params[] = '%' . $query . '%'; }
+        $c = $pdo->prepare("SELECT COUNT(*) n FROM products WHERE $where");
+        $c->execute($params);
+        $total = (int)$c->fetch()['n'];
+        $pages = max(1, (int)ceil($total / 8));
+        $page = max(1, min($page, $pages));
+        $off = ($page - 1) * 8;
+        $st = $pdo->prepare("SELECT id, name, price_usd FROM products WHERE $where ORDER BY name ASC LIMIT 8 OFFSET $off");
+        $st->execute($params);
+        $txt = "🎫 New Support Ticket\nStep 2/3 — 👤 Name: " . esc($name) . "\n📦 Which product do you need help with? Tap a product button below or use Search / Next / Prev:";
+        $rows = [];
+        $i = 0;
+        foreach ($st->fetchAll() as $p) {
+            $rows[] = [btn($p['name'] . ' — $' . $p['price_usd'], 'tic:prod:' . (int)$p['id'], $this->altStyle($i++))];
+        }
+        if (!$rows) $txt .= "\n\nNo products match your search.";
+        $txt .= "\n\nPage {$page} of {$pages} · {$total} products";
+        $nav = [btn('🔍 Search Product', 'tic:search', 'primary')];
+        if ($page > 1) $nav[] = btn('⬅️ Prev', 'tic:page:' . ($page - 1), 'primary');
+        if ($page < $pages) $nav[] = btn('Next ➡️', 'tic:page:' . ($page + 1), 'success');
+        $rows[] = $nav;
+        $rows[] = [btn('❓ General / Other Inquiry', 'tic:general', 'success')];
+        $rows[] = [btn('❌ Cancel', 'tic:cancel', 'danger')];
+        return [$txt, inline_kb($rows)];
+    }
+
+    // Render the picker by editing the callback's message in place.
+    // Preserves an active search query so paging a search keeps filtering.
+    private function showTicketProducts(callable $edit, int $page, string $query = ''): void {
+        $d = $this->stateData();
+        if ($query === '') $query = $d['query'] ?? '';
+        [$txt, $kb] = $this->ticketPicker($page, $d['name'] ?? '', $query);
+        $edit($txt, $kb);
+    }
+
+    // User picked a product (or General). Move to Step 3/3 by editing the
+    // picker message in place into the issue prompt.
+    private function ticketPickProduct(callable $edit, int $productId): void {
+        $d = $this->stateData();
+        $name = $d['name'] ?? '';
+        if ($productId > 0) {
+            $st = db()->prepare("SELECT name FROM products WHERE id=? AND bot_id=?");
+            $st->execute([$productId, $this->bot['id']]);
+            $product = $st->fetch()['name'] ?? 'General / Account Inquiry';
+        } else {
+            $product = 'General / Account Inquiry';
+        }
+        $d['product'] = $product;
+        $this->setState('await_support_msg', $d);
+        $edit("🎫 New Support Ticket\n👤 Name: " . esc($name) . "\n📦 Product: " . esc($product) . "\n📝 Step 3/3: Please describe your issue in detail:\nExplain what went wrong or how we can assist you. Type your message below and send it:", inline_kb([
+            [btn('🔙 Change Product', 'tic:change', 'primary')],
+            [btn('❌ Cancel', 'tic:cancel', 'danger')],
+        ]));
     }
 
     private function showWarrantyOrders(callable $edit): void {

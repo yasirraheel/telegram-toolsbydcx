@@ -351,7 +351,7 @@ INSERT IGNORE INTO texts (bot_id, lang, `key`, `value`) VALUES
 (1, 'en', 'txns_empty', '🔄 No deposits yet!\nUse 💎 Buy Points to deposit funds.'),
 (1, 'en', 'loyalty_title', '🏆 Loyalty Program\n\nTier: {tier}\nTotal Spent: ${spent}\nTotal Orders: {orders}\nProgress to next tier: {progress}'),
 (1, 'en', 'refer_title', '🎁 Referral Program\n\nYour link: {link}\nReferrals: {count}\nPoints Earned: {earned}\n\nShare → They join → You get {reward} point!\n\nRewards: +{reward} point per approved direct referral to BOTH.\nMilestone: {milestone} refs → +{milestone_reward} pts.'),
-(1, 'en', 'support_title', '🎫 Support Center\n\nYour Tickets: {total} total, Open: {open}\n\nButtons: New Ticket, My Tickets, Back.'),
+(1, 'en', 'support_title', '📞 Support Center\nNeed help? Create a support ticket!\n✍️ Your Tickets: {total} total 😮 Open: {open}\nChoose an option:'),
 (1, 'en', 'warranty_title', '🛡️ Warranty & Refund\n\nSelect an order:'),
 (1, 'en', 'reviews_title', '⭐ Reviews & Ratings\n\nMy reviews: {mine}, Pending to review: {pending}.'),
 (1, 'en', 'language_title', '🌐 Choose your language:'),
