@@ -27,7 +27,16 @@ class Bot {
             $this->onSuccessfulPayment($update['message']); return;
         }
         if (isset($update['callback_query'])) { $this->onCallback($update['callback_query']); return; }
-        if (isset($update['message'])) { $this->onMessage($update['message']); }
+        if (isset($update['message'])) {
+            $this->onMessage($update['message']);
+            // Issue 34: delete the user's command/tap message AFTER the bot
+            // has answered, so only the bot's screen stays visible at the
+            // bottom of the chat (like the original bot). In a private chat
+            // the bot may delete incoming messages; a failure (e.g. too old,
+            // >48h) is harmless. Deletion runs only when handling succeeded
+            // — if onMessage throws, the message is kept.
+            tg_delete($this->token, $this->chatId, (int)$update['message']['message_id']);
+        }
     }
 
     // ---------- users ----------
