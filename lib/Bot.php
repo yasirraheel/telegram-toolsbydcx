@@ -743,7 +743,7 @@ class Bot {
         $catRow = $cat->fetch();
         $catName = $catRow['name'] ?? 'Category';
         $catEmoji = $catRow['emoji'] ?? '📁';
-        $txt = $catEmoji . " " . esc($catName) . " — Page {$page}/{$pages}\n";
+        $txt = "📂 📦 " . $catEmoji . " " . esc($catName) . "\n——————————\nPage {$page}/{$pages} 🎉\n";
         $rows = [];
         $i = 0;
         foreach ($st->fetchAll() as $p) {
