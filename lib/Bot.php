@@ -505,8 +505,19 @@ class Bot {
         return 'TDCX' . (int)$this->bot['id'] . ($type === 'd' ? 'D' : 'O') . $id;
     }
 
+    // The personal C2C receive-link flow does NOT work with an API key:
+    // Binance's own docs say a 3rd-party collection request uses OAuth
+    // authentication and needs an OAuth client set up with Binance
+    // Merchant Operations — the /binancepay/openapi/user/c2c/createReceive
+    // endpoint is not a documented API-key endpoint, so Binance rejects
+    // the signed API-key request and no shareLink comes back (that is the
+    // "receive link could not be created" error). So the bot always uses
+    // the documented merchant Create Order flow instead
+    // (/binancepay/openapi/v3/order), which works with a Binance Pay
+    // merchant API key. The personal Pay history check is still used for
+    // verification where it applies.
     private function binancePersonal(array $details): bool {
-        return true;
+        return false;
     }
 
     private function trustedBinancePayLink(string $url): bool {
