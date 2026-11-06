@@ -349,13 +349,23 @@ class Bot {
             return true;
         }
         if ($state === 'await_support_name') {
-            $this->setState('await_support_subject', ['name' => $text]);
-            tg_send($this->token, $this->chatId, '📝 Step 2/3: What is the subject of your ticket?');
+            $msgs = $data['tic_msgs'] ?? [];
+            $this->setState('await_support_subject', ['name' => $text, 'tic_msgs' => $msgs]);
+            $r = tg_send($this->token, $this->chatId, '📝 Step 2/3: What is the subject of your ticket?');
+            if ($r['ok'] ?? false) {
+                $msgs[] = (int)$r['result']['message_id'];
+                $this->setState('await_support_subject', ['name' => $text, 'tic_msgs' => $msgs]);
+            }
             return true;
         }
         if ($state === 'await_support_subject') {
-            $this->setState('await_support_msg', ['name' => $data['name'] ?? '', 'subject' => $text]);
-            tg_send($this->token, $this->chatId, '📝 Step 3/3: Describe your issue in detail.');
+            $msgs = $data['tic_msgs'] ?? [];
+            $this->setState('await_support_msg', ['name' => $data['name'] ?? '', 'subject' => $text, 'tic_msgs' => $msgs]);
+            $r = tg_send($this->token, $this->chatId, '📝 Step 3/3: Describe your issue in detail.');
+            if ($r['ok'] ?? false) {
+                $msgs[] = (int)$r['result']['message_id'];
+                $this->setState('await_support_msg', ['name' => $data['name'] ?? '', 'subject' => $text, 'tic_msgs' => $msgs]);
+            }
             return true;
         }
         if ($state === 'await_support_msg') {
@@ -366,7 +376,15 @@ class Bot {
             $pdo->prepare("INSERT INTO ticket_messages (ticket_id, sender, message) VALUES (?, 'user', ?)")
                 ->execute([$tid, $text]);
             $this->setState('');
+            // Issue 40: the 3 step prompts are deleted so the ticket flow
+            // leaves no clutter; the main menu comes back. The user's 3
+            // replies are already deleted by issue 34. The confirmation
+            // stays so the user sees the ticket number.
+            foreach (($data['tic_msgs'] ?? []) as $mid) {
+                tg_delete($this->token, $this->chatId, (int)$mid);
+            }
             tg_send($this->token, $this->chatId, "✅ Ticket #{$tid} created! Our team will reply within 24-48 hours.");
+            $this->sendWelcome();
             return true;
         }
         if (str_starts_with($state, 'await_warranty:')) {
@@ -632,8 +650,13 @@ class Bot {
             case 'o': $this->showOrderDetail($edit, (int)$parts[1]); return;
             case 'tic':
                 if (($parts[1] ?? '') === 'new') {
-                    $this->setState('await_support_name');
-                    tg_send($this->token, $this->chatId, '📝 Step 1/3: What is your full name / nickname?');
+                    $this->setState('await_support_name', ['tic_msgs' => []]);
+                    $r = tg_send($this->token, $this->chatId, '📝 Step 1/3: What is your full name / nickname?');
+                    if ($r['ok'] ?? false) {
+                        $d = $this->stateData();
+                        $d['tic_msgs'] = [(int)$r['result']['message_id']];
+                        $this->setState('await_support_name', $d);
+                    }
                 } else { $this->showTickets($edit); }
                 return;
             case 'war': $this->showWarrantyOrders($edit); return;
