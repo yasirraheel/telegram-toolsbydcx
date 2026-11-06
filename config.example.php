@@ -9,4 +9,6 @@ return [
     // Random 32+ char string; encrypts bot tokens stored in the database.
     'app_key' => 'CHANGE_ME_TO_A_LONG_RANDOM_STRING',
     'base_url' => 'https://telegram.toolsbydcx.com',
+    // Binance Pay credentials are entered per bot in Admin → Payment Methods.
+    // Never put API keys or secrets in this file or in Git.
 ];

@@ -36,14 +36,28 @@ Alternative update path: clone the repo once into the deploy root and
 4. Seed the new bot's catalogue with **Copy seed catalogue** (copies categories,
    products, freebies, tiers, languages, texts, payment methods from bot 1),
    or build its catalogue from scratch in the panel.
-5. Set its payment wallets in **Payment Methods** (USDT addresses, Binance UID…)
+5. Set its payment wallets in **Payment Methods** (USDT addresses) and configure
+   Binance Pay API credentials in the Binance Pay section…
    and its welcome text / banner in **Settings**. No webhook is set until a token
    is added in the panel.
 
+## Binance Pay automatic checkout
+1. Apply for a **Binance Pay Merchant** account and complete the required KYC/KYB.
+2. In the Binance Merchant Portal, open **Developer → API** and create an API
+   identity key/API secret. Keep the secret private and whitelist the server IP
+   if Binance asks for an IP allowlist.
+3. In this app's Admin → **Payment Methods**, save the API identity key and
+   secret, then click **Fetch webhook certificate from Binance**.
+4. In Binance Merchant Portal → **Developer → Webhooks**, register:
+   `https://telegram.toolsbydcx.com/binance/webhook.php`
+5. Test with a small real payment. The bot creates a hosted Binance checkout,
+   verifies the signed `PAY_SUCCESS` notification, and uses Query Order as the
+   user-facing fallback. Products/points are fulfilled idempotently.
+
 ## Notes
 - Webhook-based bot: no long-running process needed on shared hosting.
-- Crypto payment verification is a placeholder: orders stay `pending` until an
-  admin confirms them in the panel (or a TXID is recorded). Do not present it
-  as on-chain verification.
+- Binance Pay checkout is API-verified when merchant credentials and its
+  webhook certificate are configured. BEP20/Solana/TON remain manual TXID
+  methods and still require admin confirmation.
 - Sample stock items are marked `is_sample=1` — replace them with real delivery
   items in Admin → Stock before going live.

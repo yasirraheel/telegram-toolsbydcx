@@ -3,7 +3,61 @@
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = post_str('action');
-    if ($action === 'save') {
+    if ($action === 'binance_credentials') {
+        $apiKey = trim((string)($_POST['binance_api_key'] ?? ''));
+        $apiSecret = trim((string)($_POST['binance_api_secret'] ?? ''));
+        $certPublic = trim((string)($_POST['binance_cert_public'] ?? ''));
+        $st = $pdo->prepare("SELECT * FROM payment_methods WHERE bot_id=? AND code='binance'");
+        $st->execute([$botId]);
+        $row = $st->fetch();
+        $details = $row ? (json_decode((string)$row['details'], true) ?: []) : [];
+        $keyChanged = (string)($details['api_key'] ?? '') !== $apiKey;
+        if ($apiKey === '') { flash('Binance API identity key is required.', 'err'); }
+        else {
+            $secretChanged = $apiSecret !== '';
+            $details['api_key'] = $apiKey;
+            if ($secretChanged) {
+                $details['api_secret_enc'] = enc_token($apiSecret);
+            }
+            if ($keyChanged || $secretChanged) {
+                // A rotated API key/secret must not reuse an old webhook cert.
+                unset($details['cert_sn'], $details['cert_public']);
+            }
+            if ($certPublic !== '') $details['cert_public'] = $certPublic;
+            $json = json_encode($details);
+            if ($row) {
+                $pdo->prepare("UPDATE payment_methods SET details=?, active=1 WHERE id=? AND bot_id=?")
+                    ->execute([$json, (int)$row['id'], $botId]);
+            } else {
+                $pdo->prepare("INSERT INTO payment_methods (bot_id, code, name, details, sort, active) VALUES (?,?,?,?,2,1)")
+                    ->execute([$botId, 'binance', 'Binance Auto Pay', $json]);
+            }
+            flash('Binance Pay credentials saved. Fetch the webhook certificate before going live.');
+        }
+    } elseif ($action === 'binance_cert') {
+        $st = $pdo->prepare("SELECT * FROM payment_methods WHERE bot_id=? AND code='binance'");
+        $st->execute([$botId]);
+        $row = $st->fetch();
+        $details = $row ? (json_decode((string)$row['details'], true) ?: []) : [];
+        if (!$row || !BinancePay::configured($details)) {
+            flash('Save the Binance API identity key and secret first.', 'err');
+        } else {
+            $res = BinancePay::certificates($details);
+            $certs = $res['data'] ?? [];
+            if (isset($certs['certificates']) && is_array($certs['certificates'])) $certs = $certs['certificates'];
+            if (is_array($certs) && isset($certs['certSerial'])) $certs = [$certs];
+            $cert = is_array($certs) ? ($certs[0] ?? []) : [];
+            if (($res['status'] ?? '') === 'SUCCESS' && !empty($cert['certSerial']) && !empty($cert['certPublic'])) {
+                $details['cert_sn'] = (string)$cert['certSerial'];
+                $details['cert_public'] = (string)$cert['certPublic'];
+                $pdo->prepare("UPDATE payment_methods SET details=?, active=1 WHERE id=? AND bot_id=?")
+                    ->execute([json_encode($details), (int)$row['id'], $botId]);
+                flash('Binance webhook certificate fetched and saved.');
+            } else {
+                flash('Could not fetch Binance certificate: ' . ($res['errorMessage'] ?? $res['error'] ?? 'check credentials/IP whitelist'), 'err');
+            }
+        }
+    } elseif ($action === 'save') {
         $id = post_int('id');
         $code = strtolower(trim(post_str('code')));
         $name = post_str('name');
@@ -71,6 +125,11 @@ $rows = $pdo->prepare("SELECT * FROM payment_methods WHERE bot_id=? ORDER BY sor
 $rows->execute([$botId]);
 $rows = $rows->fetchAll();
 
+$binanceDetails = [];
+foreach ($rows as $r) {
+    if ($r['code'] === 'binance') { $binanceDetails = json_decode((string)$r['details'], true) ?: []; break; }
+}
+
 admin_head('Payment Methods', 'payments', $botId, $bots);
 
 $walletOf = function (string $code, string $key) use ($rows): string {
@@ -95,6 +154,22 @@ $walletOf = function (string $code, string $key) use ($rows): string {
 <label>USDT (TON) — wallet address</label>
 <input type="text" name="ton" value="<?= esc($walletOf('ton', 'address')) ?>" placeholder="e.g. UQ...">
 <button type="submit" style="margin-top:12px">Save wallets</button></form></div>
+
+<div class="card"><h3 style="margin-top:0">🟡 Binance Pay — automatic checkout</h3>
+<p class="mut" style="margin-top:0">This is the live API integration. Buyers get a Binance checkout link; successful payments are verified by signed webhook and the Query Order API, then delivery/points are processed once only.</p>
+<p class="mut">Create the credentials in Binance Merchant Portal, paste them here, then use “Fetch webhook certificate”. Secret is encrypted before storage and is never displayed.</p>
+<form method="post"><input type="hidden" name="action" value="binance_credentials"><?= csrf_field() ?>
+<label>API identity key / API key</label>
+<input type="text" name="binance_api_key" value="<?= esc($binanceDetails['api_key'] ?? '') ?>" autocomplete="off" placeholder="Binance Pay API identity key" required>
+<label>API secret key <?= !empty($binanceDetails['api_secret_enc']) ? '(already saved — leave blank to keep)' : '' ?></label>
+<input type="password" name="binance_api_secret" value="" autocomplete="new-password" placeholder="Paste only when setting or rotating it">
+<label>Webhook public certificate (optional — fetch automatically below)</label>
+<textarea name="binance_cert_public" rows="3" class="mono" placeholder="-----BEGIN PUBLIC KEY----- ..."><?= esc($binanceDetails['cert_public'] ?? '') ?></textarea>
+<button type="submit" style="margin-top:12px">Save Binance credentials</button></form>
+<form method="post" style="margin-top:10px"><input type="hidden" name="action" value="binance_cert"><?= csrf_field() ?>
+<button type="submit" class="btn btn2">Fetch webhook certificate from Binance</button>
+<span class="mut" style="margin-left:8px"><?= !empty($binanceDetails['cert_sn']) ? 'Certificate loaded.' : 'Certificate not loaded yet.' ?></span></form>
+<p class="mut" style="margin-bottom:0">Webhook URL to register in Binance Merchant Portal → Developer → Webhooks:<br><code><?= esc(rtrim($config['base_url'], '/') . '/binance/webhook.php') ?></code></p></div>
 
 <div class="card"><h3 style="margin-top:0"><?= $edit ? '✏️ Edit payment method' : '➕ Add payment method' ?></h3>
 <form method="post"><input type="hidden" name="action" value="save"><?= csrf_field() ?>

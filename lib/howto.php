@@ -7,7 +7,7 @@ function howto_topics(): array {
         'buy_points' => ['title' => 'How to Buy Points / Deposit', 'body' => "1. Tap Buy Points.\n2. Pick \$1, \$5, \$10, \$25 or a Custom Amount.\n3. Pay with your chosen method.\n4. Points are credited at \$1 = 10 Points exactly (no rounding)."],
         'payments' => ['title' => 'Payment Methods (Overview)', 'body' => "We accept: Points Wallet, Binance Auto Pay, USDT (BEP20 / Solana / TON), Telegram Stars, Bybit Pay and local guides for EasyPaisa and JazzCash. Crypto payments need the exact amount and your TXID."],
         'stars' => ['title' => 'Telegram Stars', 'body' => "Telegram Stars payments are instant. Choose Telegram Stars at checkout and confirm the invoice inside Telegram."],
-        'binance' => ['title' => 'Binance USDT', 'body' => "Pay USDT via Binance. Paste your TXID after sending; the payment is auto-verified by API where available, otherwise an admin confirms it."],
+        'binance' => ['title' => 'Binance Pay', 'body' => "Open the Binance Pay checkout link and complete the payment in Binance. The bot verifies the paid order automatically and delivers after confirmation. If a webhook is delayed, tap Check Payment."],
         'bybit' => ['title' => 'Bybit Pay / USDT', 'body' => "Pay USDT to the bot Bybit UID shown at checkout, then tap to verify. Bybit USDT is also accepted on TRC20 and BEP20."],
         'easypaisa' => ['title' => 'EasyPaisa', 'body' => "Follow the EasyPaisa guide shown at checkout and send the exact PKR amount. Share the transaction ID with support if asked."],
         'jazzcash' => ['title' => 'JazzCash', 'body' => "Follow the JazzCash guide shown at checkout and send the exact PKR amount. Share the transaction ID with support if asked."],

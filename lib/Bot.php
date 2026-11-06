@@ -4,6 +4,7 @@
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/Telegram.php';
+require_once __DIR__ . '/BinancePay.php';
 require_once __DIR__ . '/I18n.php';
 require_once __DIR__ . '/howto.php';
 
@@ -419,9 +420,11 @@ class Bot {
             $type = $p[1] ?? 'o';
             $oid = (int)($p[2] ?? 0);
             if ($type === 'd') {
-                db()->prepare("UPDATE deposits SET txid=? WHERE id=? AND bot_id=?")->execute([$text, $oid, $this->bot['id']]);
+                db()->prepare("UPDATE deposits SET txid=? WHERE id=? AND bot_id=? AND user_id=? AND status='pending'")
+                    ->execute([$text, $oid, $this->bot['id'], $this->user['id']]);
             } else {
-                db()->prepare("UPDATE orders SET txid=? WHERE id=? AND bot_id=?")->execute([$text, $oid, $this->bot['id']]);
+                db()->prepare("UPDATE orders SET txid=? WHERE id=? AND bot_id=? AND user_id=? AND status='pending'")
+                    ->execute([$text, $oid, $this->bot['id'], $this->user['id']]);
             }
             $this->setState('');
             tg_send($this->token, $this->chatId, "✅ TXID recorded for #{$oid}. An admin will verify your payment shortly.");
@@ -490,6 +493,47 @@ class Bot {
         $txt = "💰 Deposit \${$usd} (" . fmt_points(points_for($this->bot['id'], $usd)) . " points)\n\nSelect payment method:";
         if ($edit) $edit($txt, $kb);
         else $this->showTracked($txt, $kb);
+    }
+
+    private function paymentDetails(string $method): array {
+        $st = db()->prepare("SELECT details FROM payment_methods WHERE bot_id=? AND code=? AND active=1");
+        $st->execute([$this->bot['id'], $method]);
+        return json_decode((string)($st->fetch()['details'] ?? '{}'), true) ?: [];
+    }
+
+    private function binanceTradeNo(string $type, int $id): string {
+        return 'TDCX' . (int)$this->bot['id'] . ($type === 'd' ? 'D' : 'O') . $id;
+    }
+
+    private function createBinanceOrder(array $p, int $qty, float $total, callable $edit): void {
+        $pdo = db();
+        $pdo->prepare("INSERT INTO orders (bot_id, user_id, product_id, qty, unit_price, total_usd, status, payment_method) VALUES (?,?,?,?,?,?, 'pending', 'binance')")
+            ->execute([$this->bot['id'], $this->user['id'], $p['id'], $qty, $p['price_usd'], $total]);
+        $oid = (int)$pdo->lastInsertId();
+        $tradeNo = $this->binanceTradeNo('o', $oid);
+        $details = $this->paymentDetails('binance');
+        if (!BinancePay::configured($details)) {
+            $pdo->prepare("UPDATE orders SET status='cancelled' WHERE id=?")->execute([$oid]);
+            $edit('❌ Binance Pay is not configured yet. Please contact the store admin.', $this->backHomeKb());
+            return;
+        }
+        $res = BinancePay::createOrder($details, $tradeNo, $total, (string)$p['name'], 'product-' . (int)$p['id']);
+        $data = is_array($res['data'] ?? null) ? $res['data'] : [];
+        $url = (string)($data['checkoutUrl'] ?? $data['universalUrl'] ?? $data['deeplink'] ?? '');
+        if (($res['status'] ?? '') !== 'SUCCESS' || $url === '') {
+            error_log('Binance create order failed: ' . json_encode(['code' => $res['code'] ?? '', 'message' => $res['errorMessage'] ?? $res['error'] ?? 'unknown']));
+            $pdo->prepare("UPDATE orders SET status='cancelled' WHERE id=?")->execute([$oid]);
+            $edit('❌ Binance Pay could not start this payment. Please try again or choose another method.', $this->backHomeKb());
+            return;
+        }
+        $pdo->prepare("UPDATE orders SET binance_trade_no=?, binance_prepay_id=? WHERE id=?")
+            ->execute([$tradeNo, (string)($data['prepayId'] ?? ''), $oid]);
+        $txt = "🟡 Binance Pay\n\nOrder #{$oid}\nAmount: $" . fmt_usd($total) . " USDT\n\nOpen Binance Pay, complete the payment, then tap Check Payment. Delivery is automatic after Binance confirms the payment.";
+        $kb = inline_kb([
+            [btn_url('🟡 Open Binance Pay', $url, 'success')],
+            [btn('🔍 Check Payment', 'pc:o:' . $oid, 'primary'), btn('❌ Cancel Payment', 'px:o:' . $oid, 'danger')],
+        ]);
+        $edit($txt, $kb);
     }
 
     private function showFreebies(): void {
@@ -883,6 +927,10 @@ class Bot {
             $this->createStarsInvoice($p, $qty, $total, $edit);
             return;
         }
+        if ($method === 'binance') {
+            $this->createBinanceOrder($p, $qty, $total, $edit);
+            return;
+        }
         // Crypto / Binance: pending order + payment screen
         $pdo = db();
         $pdo->prepare("INSERT INTO orders (bot_id, user_id, product_id, qty, unit_price, total_usd, status, payment_method) VALUES (?,?,?,?,?,?, 'pending', ?)")
@@ -1038,6 +1086,33 @@ class Bot {
             $edit('⭐ Stars invoice sent. Complete the payment in Telegram to receive your points.', $this->backHomeKb());
             return;
         }
+        if ($method === 'binance') {
+            $tradeNo = $this->binanceTradeNo('d', $did);
+            $details = $this->paymentDetails('binance');
+            if (!BinancePay::configured($details)) {
+                $pdo->prepare("UPDATE deposits SET status='failed' WHERE id=?")->execute([$did]);
+                $edit('❌ Binance Pay is not configured yet. Please contact the store admin.', $this->backHomeKb());
+                return;
+            }
+            $res = BinancePay::createOrder($details, $tradeNo, $usd, 'Points deposit', 'deposit-' . $did);
+            $data = is_array($res['data'] ?? null) ? $res['data'] : [];
+            $url = (string)($data['checkoutUrl'] ?? $data['universalUrl'] ?? $data['deeplink'] ?? '');
+            if (($res['status'] ?? '') !== 'SUCCESS' || $url === '') {
+                error_log('Binance deposit order failed: ' . json_encode(['code' => $res['code'] ?? '', 'message' => $res['errorMessage'] ?? $res['error'] ?? 'unknown']));
+                $pdo->prepare("UPDATE deposits SET status='failed' WHERE id=?")->execute([$did]);
+                $edit('❌ Binance Pay could not start this deposit. Please try again or choose another method.', $this->backHomeKb());
+                return;
+            }
+            $pdo->prepare("UPDATE deposits SET binance_trade_no=?, binance_prepay_id=? WHERE id=?")
+                ->execute([$tradeNo, (string)($data['prepayId'] ?? ''), $did]);
+            $txt = "🟡 Binance Pay\n\nDeposit #{$did}\nAmount: $" . fmt_usd($usd) . " USDT → " . fmt_points($points) . " points\n\nOpen Binance Pay, complete the payment, then tap Check Payment. Points are credited automatically after confirmation.";
+            $kb = inline_kb([
+                [btn_url('🟡 Open Binance Pay', $url, 'success')],
+                [btn('🔍 Check Payment', 'pc:d:' . $did, 'primary'), btn('❌ Cancel', 'px:d:' . $did, 'danger')],
+            ]);
+            $edit($txt, $kb);
+            return;
+        }
         $pm = $pdo->prepare("SELECT details FROM payment_methods WHERE bot_id=? AND code=?");
         $pm->execute([$this->bot['id'], $method]);
         $details = json_decode($pm->fetch()['details'] ?? '{}', true) ?: [];
@@ -1077,20 +1152,164 @@ class Bot {
     }
 
     private function checkPayment(callable $edit, string $type, int $refId): void {
-        // Placeholder verification: crypto cannot be auto-verified without a
-        // chain indexer. If a TXID was recorded, the order/deposit stays pending
-        // for admin confirmation; otherwise ask for the TXID.
         $pdo = db();
         $table = $type === 'd' ? 'deposits' : 'orders';
-        $st = $pdo->prepare("SELECT txid FROM $table WHERE id=? AND bot_id=? AND user_id=?");
+        $st = $pdo->prepare("SELECT * FROM $table WHERE id=? AND bot_id=? AND user_id=?");
         $st->execute([$refId, $this->bot['id'], $this->user['id']]);
         $o = $st->fetch();
-        if ($o && $o['txid'] !== '') {
+        if (!$o) { $edit('❌ Payment reference not found.', $this->backHomeKb()); return; }
+        if (($o['method'] ?? $o['payment_method'] ?? '') === 'binance' && (string)$o['binance_trade_no'] !== '') {
+            $details = $this->paymentDetails('binance');
+            if (!BinancePay::configured($details)) {
+                $edit('❌ Binance Pay is not configured yet. Please contact the store admin.', $this->backHomeKb());
+                return;
+            }
+            $res = BinancePay::queryOrder($details, (string)$o['binance_trade_no'], (string)$o['binance_prepay_id']);
+            $data = is_array($res['data'] ?? null) ? $res['data'] : [];
+            if (($res['status'] ?? '') !== 'SUCCESS' || !$data) {
+                error_log('Binance query failed: ' . json_encode(['code' => $res['code'] ?? '', 'message' => $res['errorMessage'] ?? $res['error'] ?? 'unknown']));
+                $edit('⏳ Binance Pay is temporarily unavailable. Please tap Check Payment again in a moment.', $this->backHomeKb());
+                return;
+            }
+            $status = (string)($data['status'] ?? '');
+            if ($status === 'PAID') {
+                $amount = (float)($data['totalFee'] ?? -1);
+                $currency = strtoupper((string)($data['currency'] ?? ''));
+                if ($currency !== 'USDT' || abs($amount - (float)$o[$type === 'd' ? 'amount_usd' : 'total_usd']) > 0.00000001) {
+                    error_log('Binance payment amount mismatch: ' . json_encode(['id' => $refId, 'amount' => $amount, 'currency' => $currency]));
+                    $edit('❌ Binance reported a payment, but the amount or currency does not match this reference. Contact support before paying again.', $this->backHomeKb());
+                    return;
+                }
+                $txid = (string)($data['transactionId'] ?? $data['prepayId'] ?? '');
+                if ($type === 'd') {
+                    $this->confirmBinanceDeposit($refId, $txid);
+                } else {
+                    $p = $this->product((int)$o['product_id']);
+                    if (!$p) { $edit('❌ Product no longer exists. Contact support with this order number.', $this->backHomeKb()); return; }
+                    $this->fulfillExistingOrder($refId, $p, (int)$o['qty'], $txid, $edit);
+                }
+                return;
+            }
+            if (in_array($status, ['EXPIRED', 'CANCELED', 'ERROR'], true)) {
+                $edit('❌ Binance payment status: ' . $status . '. You can start a new payment from the product screen.', $this->backHomeKb());
+                return;
+            }
+            $edit('⏳ Binance payment status: ' . ($status ?: 'PENDING') . '. Complete the payment, then check again.', $this->backHomeKb());
+            return;
+        }
+        if ($o['txid'] !== '') {
             $edit("⏳ Payment for #{$refId} is under admin review (TXID: " . esc($o['txid']) . "). You will be notified once confirmed.", $this->backHomeKb());
             return;
         }
         $this->setState('await_txid:' . $type . ':' . $refId);
         $edit("📋 No TXID recorded yet for #{$refId}. Please paste your transaction ID (TXID) here and an admin will verify it.", $this->backHomeKb());
+    }
+
+    private function fulfillExistingOrder(int $oid, array $p, int $qty, string $txid, ?callable $edit = null): bool {
+        $pdo = db();
+        $contents = [];
+        $alreadyDelivered = false;
+        try {
+            $pdo->beginTransaction();
+            $st = $pdo->prepare("SELECT * FROM orders WHERE id=? AND bot_id=? AND user_id=? FOR UPDATE");
+            $st->execute([$oid, $this->bot['id'], $this->user['id']]);
+            $order = $st->fetch();
+            if (!$order) throw new Exception('order not found');
+            if ($order['status'] === 'delivered') { $alreadyDelivered = true; $pdo->commit(); }
+            elseif ($order['status'] !== 'pending' && !($order['status'] === 'cancelled' && $order['payment_method'] === 'binance')) {
+                $pdo->commit(); return false;
+            } else {
+                $stock = $pdo->prepare("SELECT id, content FROM stock_items WHERE bot_id=? AND product_id=? AND status='available' ORDER BY id ASC LIMIT $qty FOR UPDATE");
+                $stock->execute([$this->bot['id'], $p['id']]);
+                $items = $stock->fetchAll();
+                if (count($items) < $qty) throw new Exception('not enough stock');
+                foreach ($items as $it) {
+                    $pdo->prepare("UPDATE stock_items SET status='sold', sold_order_id=? WHERE id=?")->execute([$oid, $it['id']]);
+                    $pdo->prepare("INSERT INTO order_items (order_id, stock_item_id, content_snapshot) VALUES (?,?,?)")
+                        ->execute([$oid, $it['id'], $it['content']]);
+                    $contents[] = $it['content'];
+                }
+                $pdo->prepare("UPDATE orders SET status='delivered', txid=?, delivered_at=NOW() WHERE id=? AND status IN ('pending','cancelled')")
+                    ->execute([$txid, $oid]);
+                $pdo->prepare("UPDATE products SET sold_count = sold_count + ? WHERE id=?")->execute([$qty, $p['id']]);
+                $pdo->prepare("UPDATE users SET total_spent = total_spent + ?, total_orders = total_orders + 1 WHERE id=?")
+                    ->execute([$order['total_usd'], $this->user['id']]);
+                $pdo->commit();
+            }
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            // Keep the payment trace so an admin can reconcile a paid order
+            // when stock is temporarily exhausted.
+            $pdo->prepare("UPDATE orders SET txid=? WHERE id=? AND bot_id=? AND payment_method='binance'")
+                ->execute([$txid, $oid, $this->bot['id']]);
+            error_log('Binance order fulfillment failed #' . $oid . ': ' . $e->getMessage());
+            if ($edit) $edit('✅ Payment received, but delivery is waiting for stock. Contact support with order #' . $oid . '.', $this->backHomeKb());
+            else tg_send($this->token, $this->chatId, '✅ Payment received for order #' . $oid . ', but delivery is waiting for stock. Contact support.');
+            return false;
+        }
+        if ($alreadyDelivered) {
+            if ($edit) $edit('✅ This payment was already confirmed and the order was delivered.', $this->backHomeKb());
+            return true;
+        }
+        $this->refreshUser();
+        $this->deliver($oid, $p, $qty, $contents, $edit);
+        return true;
+    }
+
+    private function confirmBinanceDeposit(int $did, string $txid): bool {
+        $pdo = db();
+        try {
+            $pdo->beginTransaction();
+            $st = $pdo->prepare("SELECT * FROM deposits WHERE id=? AND bot_id=? AND user_id=? FOR UPDATE");
+            $st->execute([$did, $this->bot['id'], $this->user['id']]);
+            $dep = $st->fetch();
+            if (!$dep) throw new Exception('deposit not found');
+            if ($dep['status'] === 'confirmed') { $pdo->commit(); return true; }
+            if (!in_array($dep['status'], ['pending', 'cancelled'], true)) { $pdo->commit(); return false; }
+            $pdo->prepare("UPDATE deposits SET status='confirmed', txid=? WHERE id=?")->execute([$txid, $did]);
+            add_points($this->bot['id'], $this->user['id'], (float)$dep['points'], 'deposit', 'deposit', $did);
+            $pdo->commit();
+            $this->refreshUser();
+            tg_send($this->token, $this->chatId, "✅ Binance payment confirmed! +" . fmt_points($dep['points']) . " points (Deposit #{$did}, $" . fmt_usd($dep['amount_usd']) . "). Your balance is now " . fmt_points((float)$this->user['points_wallet'] + (float)$this->user['points_referral']) . " points.", $this->backHomeKb());
+            return true;
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('Binance deposit fulfillment failed #' . $did . ': ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    // Called by the Binance webhook after its RSA signature and amount have
+    // been validated. It is idempotent: duplicate notifications cannot double
+    // deliver stock or credit points.
+    public function handleBinanceWebhook(array $data): bool {
+        $tradeNo = trim((string)($data['merchantTradeNo'] ?? ''));
+        if ($tradeNo === '' || strtoupper((string)($data['currency'] ?? '')) !== 'USDT') return false;
+        $pdo = db();
+        $st = $pdo->prepare("SELECT * FROM orders WHERE bot_id=? AND binance_trade_no=? LIMIT 1");
+        $st->execute([$this->bot['id'], $tradeNo]);
+        $order = $st->fetch();
+        $type = 'o';
+        $row = $order;
+        if (!$row) {
+            $st = $pdo->prepare("SELECT * FROM deposits WHERE bot_id=? AND binance_trade_no=? LIMIT 1");
+            $st->execute([$this->bot['id'], $tradeNo]);
+            $row = $st->fetch();
+            $type = 'd';
+        }
+        if (!$row) return true; // Old/other merchant notification; acknowledge it.
+        $expected = (float)($type === 'd' ? $row['amount_usd'] : $row['total_usd']);
+        if (abs((float)($data['totalFee'] ?? -1) - $expected) > 0.00000001) return false;
+        $u = $pdo->prepare("SELECT * FROM users WHERE id=? AND bot_id=?");
+        $u->execute([(int)$row['user_id'], $this->bot['id']]);
+        $this->user = $u->fetch() ?: null;
+        if (!$this->user) return false;
+        $this->i->setLang($this->user['language'] ?? 'en');
+        $this->chatId = (int)$this->user['telegram_id'];
+        if ($type === 'd') return $this->confirmBinanceDeposit((int)$row['id'], (string)($data['transactionId'] ?? ''));
+        $p = $this->product((int)$row['product_id']);
+        if (!$p) return false;
+        return $this->fulfillExistingOrder((int)$row['id'], $p, (int)$row['qty'], (string)($data['transactionId'] ?? ''));
     }
 
     private function cancelOrder(callable $edit, string $type, int $oid): void {

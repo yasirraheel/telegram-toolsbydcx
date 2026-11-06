@@ -4,6 +4,7 @@
 require_once __DIR__ . '/../../lib/Database.php';
 require_once __DIR__ . '/../../lib/helpers.php';
 require_once __DIR__ . '/../../lib/Telegram.php';
+require_once __DIR__ . '/../../lib/BinancePay.php';
 require_once __DIR__ . '/../../lib/OrderService.php';
 
 if (session_status() !== PHP_SESSION_ACTIVE) session_start();
