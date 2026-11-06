@@ -92,3 +92,27 @@ function notify_user(int $botId, int $telegramId, string $text): bool {
         return false;
     }
 }
+
+// ---- Admin pending-review counts (bell icon + sidebar badges) ----
+// Items the admin must review: open tickets, pending orders, pending
+// warranty claims, pending deposits. Used by the layout bell and the
+// notifications page.
+function admin_pending_counts(PDO $pdo, int $botId): array {
+    $c = ['tickets' => 0, 'orders' => 0, 'warranty' => 0, 'deposits' => 0, 'total' => 0];
+    if ($botId <= 0) return $c;
+    try {
+        $q = function (string $sql) use ($pdo, $botId): int {
+            $st = $pdo->prepare($sql);
+            $st->execute([$botId]);
+            return (int)$st->fetchColumn();
+        };
+        $c['tickets'] = $q("SELECT COUNT(*) FROM support_tickets WHERE bot_id=? AND status='open'");
+        $c['orders'] = $q("SELECT COUNT(*) FROM orders WHERE bot_id=? AND status='pending'");
+        $c['warranty'] = $q("SELECT COUNT(*) FROM warranty_claims WHERE bot_id=? AND status='pending'");
+        $c['deposits'] = $q("SELECT COUNT(*) FROM deposits WHERE bot_id=? AND status='pending'");
+    } catch (Throwable $e) {
+        error_log('pending counts failed: ' . $e->getMessage());
+    }
+    $c['total'] = $c['tickets'] + $c['orders'] + $c['warranty'] + $c['deposits'];
+    return $c;
+}

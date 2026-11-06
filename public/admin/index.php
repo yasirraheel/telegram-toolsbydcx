@@ -5,7 +5,7 @@ require_once __DIR__ . '/layout.php';
 
 $pages = ['dashboard','bots','categories','products','stock','orders','users','deposits',
     'tickets','warranty','reviews','freebies','loyalty','languages','texts','payments',
-    'apikeys','broadcasts','settings','referrals'];
+    'apikeys','broadcasts','settings','referrals','notifications'];
 $page = (string)($_GET['page'] ?? 'dashboard');
 
 if ($page === 'logout') {

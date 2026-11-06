@@ -46,8 +46,8 @@ if ($viewId) {
     <span class="mut"><?= $m['sender'] === 'admin' ? '👤 Admin' : '🙋 User' ?> · <?= esc($m['created_at']) ?></span><br><?= nl2br(esc($m['message'])) ?></div>
     <?php endforeach; ?>
     <?php if (!$msgs): ?><p class="mut">No messages yet.</p><?php endif; ?>
-    <form method="post"><input type="hidden" name="action" value="reply"><?= csrf_field() ?><input type="hidden" name="id" value="<?= (int)$ticket['id'] ?>">
-    <label>Reply</label><textarea name="message" required placeholder="Type your reply — it will also be sent to the user on Telegram."></textarea>
+    <form method="post" id="reply"><input type="hidden" name="action" value="reply"><?= csrf_field() ?><input type="hidden" name="id" value="<?= (int)$ticket['id'] ?>">
+    <label>💬 Reply — sends a direct Telegram message to the user</label><textarea name="message" required placeholder="Type your reply — it will also be sent to the user on Telegram."></textarea>
     <button type="submit" style="margin-top:10px">Send reply</button></form>
     <form method="post" style="margin-top:10px"><input type="hidden" name="action" value="<?= $ticket['status'] === 'open' ? 'close' : 'reopen' ?>"><?= csrf_field() ?><input type="hidden" name="id" value="<?= (int)$ticket['id'] ?>">
     <button type="submit" class="btn2"><?= $ticket['status'] === 'open' ? 'Close ticket' : 'Reopen ticket' ?></button></form></div>
@@ -67,12 +67,13 @@ admin_head('Support Tickets', 'tickets', $botId, $bots);
 <option value="open" <?= $filter === 'open' ? 'selected' : '' ?>>Open</option>
 <option value="closed" <?= $filter === 'closed' ? 'selected' : '' ?>>Closed</option>
 </select></form>
-<table style="margin-top:12px"><tr><th>#</th><th>Subject</th><th>User</th><th>Created</th></tr>
+<table style="margin-top:12px"><tr><th>#</th><th>Subject</th><th>User</th><th>Created</th><th></th></tr>
 <?php foreach ($rows as $t): ?><tr>
 <td><a href="index.php?page=tickets&amp;id=<?= (int)$t['id'] ?>">#<?= (int)$t['id'] ?></a></td>
 <td><?= esc($t['subject'] ?: '(no subject)') ?></td>
 <td>@<?= esc($t['username'] ?: (string)$t['telegram_id']) ?></td>
-<td class="mut"><?= esc($t['created_at']) ?></td></tr>
+<td class="mut"><?= esc($t['created_at']) ?></td>
+<td><?php if ($t['status'] === 'open'): ?><a class="btn btn-sm" href="index.php?page=tickets&amp;id=<?= (int)$t['id'] ?>#reply">💬 Reply</a><?php endif; ?></td></tr>
 <?php endforeach; ?>
-<?php if (!$rows): ?><tr><td colspan="4" class="mut">No <?= esc($filter) ?> tickets.</td></tr><?php endif; ?></table></div>
+<?php if (!$rows): ?><tr><td colspan="5" class="mut">No <?= esc($filter) ?> tickets.</td></tr><?php endif; ?></table></div>
 <?php admin_foot(); ?>

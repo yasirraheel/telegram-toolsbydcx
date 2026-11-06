@@ -41,6 +41,9 @@ function admin_head(string $title, string $page, int $botId, array $bots): void 
     $bot = null;
     foreach ($bots as $b) if ((int)$b['id'] === $botId) $bot = $b;
     $botLabel = $bot ? $bot['name'] . (!empty($bot['username']) ? ' (@' . $bot['username'] . ')' : '') : 'No bot yet';
+    // Issue 41: pending-review counts for the bell icon + sidebar badges.
+    $pc = admin_pending_counts(db(), $botId);
+    $navBadge = ['tickets' => $pc['tickets'], 'orders' => $pc['orders'], 'warranty' => $pc['warranty'], 'deposits' => $pc['deposits']];
     ?>
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -56,7 +59,7 @@ function admin_head(string $title, string $page, int $botId, array $bots): void 
 <?php foreach ($nav as $group => $links): ?>
 <h4><?= esc($group) ?></h4>
 <?php foreach ($links as $k => $label): ?>
-<a href="index.php?page=<?= esc($k) ?>" class="<?= $page === $k ? 'on' : '' ?>" data-nav="<?= esc($label) ?>"><?= esc($label) ?></a>
+<a href="index.php?page=<?= esc($k) ?>" class="<?= $page === $k ? 'on' : '' ?>" data-nav="<?= esc($label) ?>"><?= esc($label) ?><?php if (!empty($navBadge[$k])): ?><span class="nav-badge"><?= (int)$navBadge[$k] ?></span><?php endif; ?></a>
 <?php endforeach; ?>
 <?php endforeach; ?>
 <h4>Account</h4>
@@ -77,6 +80,7 @@ function admin_head(string $title, string $page, int $botId, array $bots): void 
 <noscript><button type="submit">Switch</button></noscript>
 </form>
 <div class="userchip"><span class="av"><?= esc(strtoupper(substr((string)($_SESSION['admin_username'] ?? 'A'), 0, 1))) ?></span><?= esc($_SESSION['admin_username'] ?? 'admin') ?></div>
+<a class="bell" href="index.php?page=notifications" title="<?= $pc['total'] > 0 ? (int)$pc['total'] . ' item(s) need review — open notifications' : 'Notifications — nothing needs review' ?>">🔔<?php if ($pc['total'] > 0): ?><span class="bell-badge"><?= (int)$pc['total'] ?></span><?php endif; ?></a>
 <a class="btn btn2 btn-sm" href="../" target="_blank" rel="noopener" title="Open the public store landing page">🌐 View Store</a>
 </div></div>
 <script>
