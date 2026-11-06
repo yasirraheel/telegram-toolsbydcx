@@ -506,7 +506,7 @@ class Bot {
     }
 
     private function binancePersonal(array $details): bool {
-        return BinancePay::mode($details) === 'personal';
+        return true;
     }
 
     private function trustedBinancePayLink(string $url): bool {
@@ -541,10 +541,10 @@ class Bot {
             }
             $pdo->prepare("UPDATE orders SET binance_pay_link=? WHERE id=?")
                 ->execute([$url, $oid]);
-            $txt = "🟡 Binance Pay\n\nOrder #{$oid}\nAmount: $" . fmt_usd($total) . " {$currency}\n\nOpen the link and complete the payment in Binance. Personal Pay does not send a merchant webhook, so after paying submit the payment reference. Admin will verify and deliver the order.";
+            $txt = "🟡 Binance Pay\n\nOrder #{$oid}\nAmount: $" . fmt_usd($total) . " {$currency}\n\nOpen the link and complete the payment in Binance. After payment, tap Check Payment. The bot checks your Personal Binance Pay transaction history and delivers automatically when the matching payment is found.";
             $kb = inline_kb([
                 [btn_url('🟡 Open Binance Pay', $url, 'success')],
-                [btn('✅ Payment Sent', 'ps:o:' . $oid, 'primary'), btn('❌ Cancel Payment', 'px:o:' . $oid, 'danger')],
+                [btn('🔍 Check Payment', 'pc:o:' . $oid, 'primary'), btn('❌ Cancel Payment', 'px:o:' . $oid, 'danger')],
             ]);
             $edit($txt, $kb);
             return;
@@ -1150,10 +1150,10 @@ class Bot {
                 }
                 $pdo->prepare("UPDATE deposits SET binance_pay_link=? WHERE id=?")
                     ->execute([$url, $did]);
-                $txt = "🟡 Binance Pay\n\nDeposit #{$did}\nAmount: $" . fmt_usd($usd) . " {$currency} → " . fmt_points($points) . " points\n\nComplete the payment through Binance. Personal Pay has no merchant webhook, so submit the payment reference after paying. Admin will verify and credit the points.";
+                $txt = "🟡 Binance Pay\n\nDeposit #{$did}\nAmount: $" . fmt_usd($usd) . " {$currency} → " . fmt_points($points) . " points\n\nComplete the payment through Binance. After payment, tap Check Payment. The bot checks your Personal Binance Pay transaction history and credits points automatically when the matching payment is found.";
                 $kb = inline_kb([
                     [btn_url('🟡 Open Binance Pay', $url, 'success')],
-                    [btn('✅ Payment Sent', 'ps:d:' . $did, 'primary'), btn('❌ Cancel', 'px:d:' . $did, 'danger')],
+                    [btn('🔍 Check Payment', 'pc:d:' . $did, 'primary'), btn('❌ Cancel', 'px:d:' . $did, 'danger')],
                 ]);
                 $edit($txt, $kb);
                 return;
@@ -1226,11 +1226,36 @@ class Bot {
         if (($o['method'] ?? $o['payment_method'] ?? '') === 'binance'
             && $this->binancePersonal($details)
             && (string)($o['binance_pay_link'] ?? '') !== '') {
-            if ($o['txid'] !== '') {
-                $edit("⏳ Payment reference recorded for #{$refId}. Admin will verify your Personal Binance Pay payment.", $this->backHomeKb());
+            $createdMs = strtotime((string)$o['created_at']) * 1000;
+            $startMs = max(0, $createdMs - 120000);
+            $endMs = min((int)round(microtime(true) * 1000), $createdMs + (30 * 60 * 1000));
+            $expectedAmount = (float)($type === 'd' ? $o['amount_usd'] : $o['total_usd']);
+            $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
+            $usedSt = $pdo->prepare("SELECT txid FROM orders WHERE bot_id=? AND txid<>'' UNION ALL SELECT txid FROM deposits WHERE bot_id=? AND txid<>''");
+            $usedSt->execute([$this->bot['id'], $this->bot['id']]);
+            $usedTxids = array_values(array_filter(array_map('strval', $usedSt->fetchAll(PDO::FETCH_COLUMN))));
+            $res = BinancePay::findIncomingPayment($details, $expectedAmount, $currency, $startMs, $endMs, $usedTxids);
+            if (!($res['ok'] ?? false)) {
+                error_log('Binance personal history check failed: ' . json_encode(['id' => $refId, 'code' => $res['code'] ?? '', 'error' => $res['error'] ?? 'unknown']));
+                $edit('⏳ Binance Pay verification is temporarily unavailable. Please tap Check Payment again shortly.', $this->backHomeKb());
+                return;
+            }
+            if (!($res['found'] ?? false)) {
+                $edit('⏳ Matching Binance Pay transaction not found yet. Complete the payment in Binance, wait a few seconds, then tap Check Payment again.', $this->backHomeKb());
+                return;
+            }
+            $transaction = is_array($res['transaction'] ?? null) ? $res['transaction'] : [];
+            $txid = trim((string)($transaction['transactionId'] ?? ''));
+            if ($txid === '') {
+                $edit('⏳ Binance Pay returned a payment without a transaction ID. Please try Check Payment again.', $this->backHomeKb());
+                return;
+            }
+            if ($type === 'd') {
+                $this->confirmBinanceDeposit($refId, $txid);
             } else {
-                $this->setState('await_txid:' . $type . ':' . $refId);
-                $edit("📋 Personal Binance Pay ka automatic status check available nahi hai. Payment complete karne ke baad Binance payment reference/order ID paste karo; admin verify karega.", $this->backHomeKb());
+                $p = $this->product((int)$o['product_id']);
+                if (!$p) { $edit('❌ Product no longer exists. Contact support with this order number.', $this->backHomeKb()); return; }
+                $this->fulfillExistingOrder($refId, $p, (int)$o['qty'], $txid, $edit);
             }
             return;
         }

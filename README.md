@@ -30,9 +30,9 @@ plain PHP admin panel, reseller API.
 - **Multi-bot:** add any bot by pasting its Bot API token in the panel; the
   panel sets the webhook and the bot serves from the same codebase under its
   own `bot_id` scope.
-- **Binance Pay:** Admin → Payment Methods supports Personal Pay receive links
-  (admin verification) and Merchant Pay hosted checkout (webhook/API
-  verification). Secrets are encrypted in the database. See `DEPLOY.md`.
+- **Binance Pay:** Admin → Payment Methods stores encrypted Personal Pay API
+  credentials, creates fixed-amount receive links, and verifies incoming
+  payments through Binance Pay transaction history. See `DEPLOY.md`.
 
 ## Quick start
 See `DEPLOY.md`. Test bot logic locally (on the server) with:
