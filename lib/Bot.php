@@ -94,19 +94,21 @@ class Bot {
             ->execute([json_encode($d), $this->user['id']]);
         $this->user['state_data'] = json_encode($d);
     }
-    // Show a text screen on the tracked menu message when possible,
-    // otherwise as a fresh message (which then becomes the tracked one).
+    // Show a text screen as a FRESH message at the bottom of the chat.
+    // This is used for screens triggered by a text message (a hamburger
+    // command or a reply-keyboard tap): the user is looking at the bottom
+    // of the chat, where their command and the recent messages are, so
+    // editing the old tracked banner (which sits above those messages)
+    // would be invisible — the user would press a command, it would run
+    // up top, and they would see nothing happen. The old tracked menu
+    // message is deleted first so the chat does not pile up, then the new
+    // screen is sent at the bottom and becomes the tracked one. Inline
+    // button taps use the $edit closure instead (they edit in place,
+    // because the user is looking at the banner when they tap it).
     private function showTracked(string $text, $kb): void {
         $m = $this->menuMsg();
         if ($m['id'] > 0) {
-            $res = $m['media']
-                ? tg_edit_caption($this->token, $this->chatId, $m['id'], $text, $kb)
-                : tg_edit($this->token, $this->chatId, $m['id'], $text, $kb);
-            if ($res['ok'] ?? false) {
-                $this->menuTrack((int)($res['result']['message_id'] ?? $m['id']), !empty($res['_fallback_text']) ? false : $m['media']);
-                return;
-            }
-            if (str_contains((string)($res['description'] ?? ''), 'message is not modified')) return;
+            tg_api($this->token, 'deleteMessage', ['chat_id' => $this->chatId, 'message_id' => $m['id']]);
         }
         $res = tg_send($this->token, $this->chatId, $text, $kb);
         if ($res['ok'] ?? false) $this->menuTrack((int)$res['result']['message_id'], false);
@@ -171,7 +173,7 @@ class Bot {
                 '/language' => $this->showLanguage(),
                 '/support' => $this->showSupport(),
                 '/help' => $this->showHowTo(),
-                default => $this->sendWelcome(),
+                default => $this->sendWelcome(true),
             };
             return;
         }
@@ -188,7 +190,7 @@ class Bot {
         foreach ($map as [$labels, $action]) {
             if (in_array($text, $labels, true)) {
                 match ($action) {
-                    'welcome' => $this->sendWelcome(),
+                    'welcome' => $this->sendWelcome(true),
                     'api' => $this->showApi(),
                     'freebies' => $this->showFreebies(),
                     'howto' => $this->showHowTo(),
@@ -196,7 +198,7 @@ class Bot {
                 return;
             }
         }
-        $this->sendWelcome();
+        $this->sendWelcome(true);
     }
 
     private function cmdStart(string $arg): void {
@@ -387,7 +389,7 @@ class Bot {
             foreach (($data['tic_msgs'] ?? []) as $mid) {
                 tg_delete($this->token, $this->chatId, (int)$mid);
             }
-            $this->sendWelcome();
+            $this->sendWelcome(true);
             return true;
         }
         if (str_starts_with($state, 'await_warranty:')) {
@@ -679,7 +681,7 @@ class Bot {
                     $d = $this->stateData();
                     foreach (($d['tic_msgs'] ?? []) as $mid) tg_delete($this->token, $this->chatId, (int)$mid);
                     $this->setState('');
-                    $this->sendWelcome();
+                    $this->sendWelcome(true);
                 } elseif ($sub === 'view') {
                     $this->showTicketDetail($edit, (int)($parts[2] ?? 0));
                 } else { $this->showTickets($edit); }
