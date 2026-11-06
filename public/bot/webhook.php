@@ -42,7 +42,9 @@ if (function_exists('fastcgi_finish_request')) {
 }
 
 try {
+    error_log('webhook dbg: update ' . ($update['update_id'] ?? '?') . ' starting handle');
     (new Bot($bot))->handle($update);
+    error_log('webhook dbg: update ' . ($update['update_id'] ?? '?') . ' handle done');
 } catch (Throwable $e) {
     error_log('webhook error bot ' . $botId . ': ' . $e->getMessage());
 }
