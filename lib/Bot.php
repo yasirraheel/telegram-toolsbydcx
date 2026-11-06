@@ -237,7 +237,13 @@ class Bot {
         // user sees nothing and thinks the bot is dead. A fresh /start must
         // appear at the bottom of the chat, visibly.
         $m = $this->menuMsg();
-        $caption = $this->i->t('welcome_caption', ['user_id' => $this->user['telegram_id']]);
+        // Issue 38: the chat-list preview shows the banner caption, so the
+        // caption must be short. The DB welcome_caption still holds the old
+        // long "Account User ID" text (SSH is down, so the live DB cannot be
+        // updated from here), and the preview kept showing that text. Use a
+        // short caption in code so pulling alone fixes the preview; the
+        // Account screen still shows the user ID / points / balance.
+        $caption = '👋 Welcome to ToolsByDcx';
         if (!$fresh && $m['id'] > 0 && $m['media']) {
             $res = tg_edit_caption($this->token, $this->chatId, $m['id'], $caption, $this->mainMenuKb());
             if ($res['ok'] ?? false) {
@@ -584,7 +590,9 @@ class Bot {
                 if ($screen === 'home') {
                     if ($isMedia) {
                         // Edit the banner back to the welcome screen in place.
-                        $edit($this->i->t('welcome_caption', ['user_id' => $this->user['telegram_id']]), $this->mainMenuKb());
+                        // Short caption (issue 38): the chat-list preview shows
+                        // the caption, so it must not be the long Account text.
+                        $edit('👋 Welcome to ToolsByDcx', $this->mainMenuKb());
                     } else {
                         // Text screen: remove it and bring the banner back.
                         tg_api($this->token, 'deleteMessage', ['chat_id' => $this->chatId, 'message_id' => $msgId]);
