@@ -72,3 +72,5 @@ UPDATE categories SET emoji='🎵' WHERE id=68 AND bot_id=1;
 UPDATE categories SET emoji='🎮' WHERE id=69 AND bot_id=1;
 UPDATE categories SET emoji='📦' WHERE id=70 AND bot_id=1;
 UPDATE categories SET emoji='📚' WHERE id=71 AND bot_id=1;
+UPDATE categories SET emoji='🌍' WHERE id=141 AND bot_id=1;
+UPDATE categories SET emoji='🤖' WHERE id=142 AND bot_id=1;
