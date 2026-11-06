@@ -373,9 +373,13 @@ class Bot {
         }
         if ($state === 'await_support_msg') {
             $pdo = db();
+            // Original bot: the ticket subject is just the product
+            // ("General / Account Inquiry"), not "Name — Product". The
+            // name the user entered is shown in the flow, and the admin
+            // panel shows who the ticket is from.
             $product = $data['product'] ?? 'General / Account Inquiry';
             $pdo->prepare("INSERT INTO support_tickets (bot_id, user_id, subject) VALUES (?,?,?)")
-                ->execute([$this->bot['id'], $this->user['id'], ($data['name'] ?? '') . ' — ' . $product]);
+                ->execute([$this->bot['id'], $this->user['id'], $product]);
             $tid = (int)$pdo->lastInsertId();
             $pdo->prepare("INSERT INTO ticket_messages (ticket_id, sender, message) VALUES (?, 'user', ?)")
                 ->execute([$tid, $text]);
@@ -520,10 +524,12 @@ class Bot {
         $st = db()->prepare("SELECT COUNT(*) c, SUM(status='open') o FROM support_tickets WHERE bot_id=? AND user_id=?");
         $st->execute([$this->bot['id'], $this->user['id']]);
         $r = $st->fetch();
-        $txt = $this->i->t('support_title', ['total' => (int)$r['c'], 'open' => (int)$r['o']]);
+        // Original bot's exact Support Center text (hardcoded in code so
+        // pulling alone fixes it; the live DB still holds the old text).
+        $txt = "📞 Support Center\n━━━━━━━━━━━━━━━━━━━━\nNeed help? Create a support ticket!\n✍️ Your Tickets: " . (int)$r['c'] . " total\n😮 Open: " . (int)$r['o'] . "\nChoose an option:";
         $kb = inline_kb([
-            [btn('✉️ New Ticket', 'tic:new', 'primary'), btn('📋 My Tickets', 'tic:list', 'success')],
-            [btn($this->i->t('btn_back'), 'm:home', 'primary')],
+            [btn('🎫 New Ticket', 'tic:new', 'primary'), btn('📋 My Tickets', 'tic:list', 'success')],
+            [btn('🔙 Back', 'm:home', 'primary')],
         ]);
         $this->showTracked($txt, $kb);
     }
@@ -674,6 +680,8 @@ class Bot {
                     foreach (($d['tic_msgs'] ?? []) as $mid) tg_delete($this->token, $this->chatId, (int)$mid);
                     $this->setState('');
                     $this->sendWelcome();
+                } elseif ($sub === 'view') {
+                    $this->showTicketDetail($edit, (int)($parts[2] ?? 0));
                 } else { $this->showTickets($edit); }
                 return;
             case 'war': $this->showWarrantyOrders($edit); return;
@@ -1248,10 +1256,11 @@ class Bot {
         $st = db()->prepare("SELECT COUNT(*) c, SUM(status='open') o FROM support_tickets WHERE bot_id=? AND user_id=?");
         $st->execute([$this->bot['id'], $this->user['id']]);
         $r = $st->fetch();
-        $txt = $this->i->t('support_title', ['total' => (int)$r['c'], 'open' => (int)$r['o']]);
+        // Original bot's exact Support Center text (see showSupport).
+        $txt = "📞 Support Center\n━━━━━━━━━━━━━━━━━━━━\nNeed help? Create a support ticket!\n✍️ Your Tickets: " . (int)$r['c'] . " total\n😮 Open: " . (int)$r['o'] . "\nChoose an option:";
         $kb = inline_kb([
-            [btn('✉️ New Ticket', 'tic:new', 'primary'), btn('📋 My Tickets', 'tic:list', 'success')],
-            [btn($this->i->t('btn_back'), 'm:home', 'primary')],
+            [btn('🎫 New Ticket', 'tic:new', 'primary'), btn('📋 My Tickets', 'tic:list', 'success')],
+            [btn('🔙 Back', 'm:home', 'primary')],
         ]);
         $edit($txt, $kb);
     }
@@ -1260,10 +1269,40 @@ class Bot {
         $st = db()->prepare("SELECT * FROM support_tickets WHERE bot_id=? AND user_id=? ORDER BY created_at DESC LIMIT 10");
         $st->execute([$this->bot['id'], $this->user['id']]);
         $rows = $st->fetchAll();
-        if (!$rows) { $edit('📋 You have no tickets yet.', $this->backHomeKb()); return; }
-        $txt = "📋 My Tickets\n";
-        foreach ($rows as $t) $txt .= "\n#{$t['id']} — " . esc($t['subject']) . " — {$t['status']}";
-        $edit($txt, $this->backHomeKb());
+        // Original bot's exact My Tickets format: each ticket is a
+        // clickable button that opens its detail view.
+        $txt = "📋 Your Tickets\n━━━━━━━━━━━━━━━━━━━━";
+        $kbRows = [];
+        $i = 0;
+        foreach ($rows as $t) {
+            $mark = $t['status'] === 'open' ? '🟡 Open' : '✅ Closed';
+            $txt .= "\n🎫 #{$t['id']} {$mark}\n📝 " . esc($t['subject']) . "\n📅 " . date('d M h:i A', strtotime($t['created_at']));
+            $kbRows[] = [btn("🎫 #{$t['id']} — " . $t['subject'] . " ( {$mark} )", 'tic:view:' . (int)$t['id'], $this->altStyle($i++))];
+        }
+        if (!$rows) $txt .= "\n\nYou have no tickets yet.";
+        $kbRows[] = [btn('🎫 New Ticket', 'tic:new', 'primary')];
+        $kbRows[] = [btn('🔙 Back', 'm:home', 'primary')];
+        $edit($txt, inline_kb($kbRows));
+    }
+
+    // Ticket detail view (original bot): subject, status, created date and
+    // the full "Your Message" content. No reply button — the original has
+    // none; a follow-up typed in the chat does not attach to the ticket,
+    // and only the admin can close it.
+    private function showTicketDetail(callable $edit, int $tid): void {
+        $st = db()->prepare("SELECT * FROM support_tickets WHERE id=? AND bot_id=? AND user_id=?");
+        $st->execute([$tid, $this->bot['id'], $this->user['id']]);
+        $t = $st->fetch();
+        if (!$t) { $this->showTickets($edit); return; }
+        $m = db()->prepare("SELECT message FROM ticket_messages WHERE ticket_id=? AND sender='user' ORDER BY created_at ASC LIMIT 1");
+        $m->execute([$tid]);
+        $msg = $m->fetch()['message'] ?? '';
+        $mark = $t['status'] === 'open' ? '🟡 Open' : '✅ Resolved';
+        $txt = "🎫 Ticket #{$t['id']}\n━━━━━━━━━━━━━━━━━━━━\n📝 Subject: " . esc($t['subject']) . "\n📊 Status: {$mark}\n📅 Created: " . date('d M Y h:i A', strtotime($t['created_at'])) . "\n📄 Your Message:\n" . esc($msg);
+        $edit($txt, inline_kb([
+            [btn('📋 My Tickets', 'tic:list', 'primary')],
+            [btn('🔙 Back', 'm:home', 'primary')],
+        ]));
     }
 
     // ---------- ticket product picker (original bot method) ----------

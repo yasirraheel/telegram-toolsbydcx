@@ -19,7 +19,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif ($action === 'close') {
         $pdo->prepare("UPDATE support_tickets SET status='closed' WHERE id=?")->execute([$tid]);
-        flash('Ticket #' . $tid . ' closed.');
+        // Original bot notifies the user when the admin resolves a ticket.
+        $sent = notify_user($botId, (int)$ticket['telegram_id'], "✅ Ticket #{$tid} Resolved! " . ($ticket['subject'] ?: '') . "\nAdmin has resolved your ticket. Thank you! 👍");
+        flash('Ticket #' . $tid . ' closed.' . ($sent ? ' User notified on Telegram.' : ' (could not notify on Telegram — check the bot token).'));
     } elseif ($action === 'reopen') {
         $pdo->prepare("UPDATE support_tickets SET status='open' WHERE id=?")->execute([$tid]);
         flash('Ticket #' . $tid . ' reopened.');
