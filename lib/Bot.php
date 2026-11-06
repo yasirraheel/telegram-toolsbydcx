@@ -733,10 +733,12 @@ class Bot {
         $st = $pdo->prepare("SELECT p.*, (SELECT COUNT(*) FROM stock_items s WHERE s.product_id=p.id AND s.status='available') stock
             FROM products p WHERE p.bot_id=? AND p.category_id=? AND p.active=1 ORDER BY p.sort ASC LIMIT 10 OFFSET $off");
         $st->execute([$this->bot['id'], $catId]);
-        $cat = $pdo->prepare("SELECT name FROM categories WHERE id=?");
+        $cat = $pdo->prepare("SELECT name, emoji FROM categories WHERE id=?");
         $cat->execute([$catId]);
-        $catName = $cat->fetch()['name'] ?? 'Category';
-        $txt = "📁 " . esc($catName) . " — Page {$page}/{$pages}\n";
+        $catRow = $cat->fetch();
+        $catName = $catRow['name'] ?? 'Category';
+        $catEmoji = $catRow['emoji'] ?? '📁';
+        $txt = $catEmoji . " " . esc($catName) . " — Page {$page}/{$pages}\n";
         $rows = [];
         $i = 0;
         foreach ($st->fetchAll() as $p) {
