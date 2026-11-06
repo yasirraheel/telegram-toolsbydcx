@@ -24,7 +24,15 @@ if (!is_array($update)) { http_response_code(200); exit('ok'); }
 // every later tap queued up behind it — and Telegram retried the slow
 // one, doubling the load. The bot's replies are still sent by handle()
 // below; only the acknowledgement is early.
+// Hostinger runs LiteSpeed/LSAPI, not PHP-FPM: fastcgi_finish_request()
+// does not exist there, and flush() alone may be buffered, so the 200
+// must be forced out with an exact Content-Length. And the script must
+// keep running after the client disconnects (ignore_user_abort defaults
+// to 0, which can kill handle() mid-reply).
+ignore_user_abort(true);
 http_response_code(200);
+header('Content-Length: 2');   // 'ok' is 2 bytes — forces LiteSpeed to flush now
+header('Connection: close');
 echo 'ok';
 if (function_exists('fastcgi_finish_request')) {
     fastcgi_finish_request();
