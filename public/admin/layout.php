@@ -53,13 +53,13 @@ function admin_head(string $title, string $page, int $botId, array $bots): void 
 <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32.png">
 <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
-<link rel="stylesheet" href="../assets/site.css?v=6"></head>
+<link rel="stylesheet" href="../assets/site.css?v=7"></head>
 <body><div class="wrap">
 <nav class="side" id="sidebar"><h1><a href="index.php?page=dashboard" title="Dashboard">🛒 Tools<span>ByDcx</span></a></h1>
 <?php foreach ($nav as $group => $links): ?>
 <h4><?= esc($group) ?></h4>
 <?php foreach ($links as $k => $label): ?>
-<a href="index.php?page=<?= esc($k) ?>" class="<?= $page === $k ? 'on' : '' ?>" data-nav="<?= esc($label) ?>"><?= esc($label) ?><?php if (!empty($navBadge[$k])): ?><span class="nav-badge"><?= (int)$navBadge[$k] ?></span><?php endif; ?></a>
+<a href="index.php?page=<?= esc($k) ?>" class="<?= $page === $k ? 'on' : '' ?>" data-nav="<?= esc($label) ?>"><?= esc($label) ?><?php if (!empty($navBadge[$k])): ?><span class="nav-badge" data-badge="<?= esc($k) ?>"><?= (int)$navBadge[$k] ?></span><?php endif; ?></a>
 <?php endforeach; ?>
 <?php endforeach; ?>
 <h4>Account</h4>
@@ -93,5 +93,10 @@ function filterNav(q){q=q.toLowerCase();document.querySelectorAll('.side a[data-
 }
 
 function admin_foot(): void {
-    echo '<script>(function(){var s=document.getElementById("sidebar");if(!s)return;var k="tdcx-side-scroll";try{var y=sessionStorage.getItem(k);if(y!==null)s.scrollTop=parseInt(y,10)||0;}catch(e){}s.addEventListener("scroll",function(){try{sessionStorage.setItem(k,String(s.scrollTop));}catch(e){}},{passive:true});var on=s.querySelector("a.on");if(on){var r=on.getBoundingClientRect(),sr=s.getBoundingClientRect();if(r.top<sr.top||r.bottom>sr.bottom){on.scrollIntoView({block:"nearest"});}}})();</script></main></div></body></html>';
+    echo '<script>(function(){var s=document.getElementById("sidebar");if(!s)return;var k="tdcx-side-scroll";try{var y=sessionStorage.getItem(k);if(y!==null)s.scrollTop=parseInt(y,10)||0;}catch(e){}s.addEventListener("scroll",function(){try{sessionStorage.setItem(k,String(s.scrollTop));}catch(e){}},{passive:true});var on=s.querySelector("a.on");if(on){var r=on.getBoundingClientRect(),sr=s.getBoundingClientRect();if(r.top<sr.top||r.bottom>sr.bottom){on.scrollIntoView({block:"nearest"});}}})();</script>';
+    // Live pending-counts poll: refresh the bell + sidebar badges every
+    // 20s from the counts endpoint, so a finished action drops its counter
+    // without a page reload. A count of 0 removes its badge entirely — a
+    // 0 is never shown.
+    echo '<script>(function(){function upd(){fetch("index.php?page=counts",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(c){var keys=["tickets","orders","warranty","deposits"];keys.forEach(function(k){var n=parseInt(c[k]||0,10);var b=document.querySelector(".nav-badge[data-badge=\""+k+"\"]");if(n>0){if(b){b.textContent=n;}else{var a=document.querySelector("a[href=\"index.php?page="+k+"\"]");if(a){var s=document.createElement("span");s.className="nav-badge";s.setAttribute("data-badge",k);s.textContent=n;a.appendChild(s);}}}else if(b){b.remove();}});var tot=parseInt(c.total||0,10);var bell=document.querySelector(".bell");if(bell){var bb=bell.querySelector(".bell-badge");if(tot>0){if(bb){bb.textContent=tot;}else{var s2=document.createElement("span");s2.className="bell-badge";s2.textContent=tot;bell.appendChild(s2);}}else if(bb){bb.remove();}}}).catch(function(){});}upd();setInterval(upd,20000);})();</script></main></div></body></html>';
 }
