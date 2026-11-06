@@ -289,25 +289,27 @@ class Bot {
     // removed. Freebies / Reseller API / How to Use now live on the banner's
     // inline menu instead. This only deletes the old carrier message (if any)
     // and clears the keyboard state; it never sends a new carrier.
-    // Issue 37 (final): the bottom reply keyboard (Menu / Reseller API /
-    // Freebies / How to Use) must show with NO carrier bubble. The keyboard
-    // is sent ONCE (the very first time, kb_sent = 0) and then never again:
-    // on mobile it persists after the carrier is deleted (user confirmed
-    // 11:59 PKT: emoji gone, buttons still showing, "this is good"), so
-    // re-sending it on every /start only flashes the home emoji the user
-    // asked to stop (12:03 PKT). When it is sent, the carrier is deleted
-    // 1s later. The carrier text is normal text (not a single emoji) so it
-    // never renders as a giant emoji even briefly.
+    // Issue 37 (final v3): the bottom reply keyboard (Menu / Reseller API /
+    // Freebies / How to Use) NEEDS a carrier message to exist. Deleting the
+    // carrier removes the keyboard with it — the user proved this 12:10 PKT
+    // by deleting the home emoji and losing the 4 buttons. The earlier
+    // send-then-delete idea was wrong: the keyboard does not survive the
+    // delete. So the carrier is KEPT (never deleted by the bot). It is
+    // re-sent whenever it is missing (kb_msg_id == 0), so the buttons come
+    // back on the next /start after the user deletes it. The carrier text
+    // is just the bot name in plain text (no emoji, no "Menu", no finger)
+    // so it is a small, clean bubble, never a giant emoji. The old carrier
+    // is deleted first when a fresh one is sent. IMPORTANT: the user must
+    // not delete this message, or the 4 buttons go away again.
     private function showReplyKbHidden(): void {
         $d = $this->stateData();
-        if ((int)($d['kb_sent'] ?? 0) === 1) return;
         $oldKb = (int)($d['kb_msg_id'] ?? 0);
+        $lastKb = (int)($d['kb_sent_at'] ?? 0);
+        if ($oldKb > 0 && $lastKb !== 0 && time() - $lastKb < 900) return;
         if ($oldKb > 0) tg_delete($this->token, $this->chatId, $oldKb);
-        $res = tg_send($this->token, $this->chatId, '👇 ' . $this->i->t('btn_menu'), $this->replyKb());
+        $res = tg_send($this->token, $this->chatId, 'ToolsByDcx', $this->replyKb());
         if ($res['ok'] ?? false) {
-            sleep(1);
-            tg_delete($this->token, $this->chatId, (int)$res['result']['message_id']);
-            $d['kb_msg_id'] = 0;
+            $d['kb_msg_id'] = (int)$res['result']['message_id'];
             $d['kb_sent_at'] = time();
             $d['kb_sent'] = 1;
             db()->prepare("UPDATE users SET state_data=? WHERE id=?")
