@@ -6,6 +6,7 @@
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 require_once __DIR__ . '/../lib/Database.php';
 require_once __DIR__ . '/../lib/helpers.php';
+require_once __DIR__ . '/../lib/Telegram.php';
 
 $bot = bot_by_id(1);
 if (!$bot || !$bot['active']) { fwrite(STDERR, "No active bot id 1.\n"); exit(1); }
