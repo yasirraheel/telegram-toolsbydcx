@@ -505,6 +505,17 @@ class Bot {
         return 'TDCX' . (int)$this->bot['id'] . ($type === 'd' ? 'D' : 'O') . $id;
     }
 
+    private function binancePersonal(array $details): bool {
+        return BinancePay::mode($details) === 'personal';
+    }
+
+    private function trustedBinancePayLink(string $url): bool {
+        $parts = parse_url($url);
+        $host = strtolower((string)($parts['host'] ?? ''));
+        return in_array($host, ['app.binance.com', 'www.binance.com'], true)
+            && strtolower((string)($parts['scheme'] ?? '')) === 'https';
+    }
+
     private function createBinanceOrder(array $p, int $qty, float $total, callable $edit): void {
         $pdo = db();
         $pdo->prepare("INSERT INTO orders (bot_id, user_id, product_id, qty, unit_price, total_usd, status, payment_method) VALUES (?,?,?,?,?,?, 'pending', 'binance')")
@@ -515,6 +526,27 @@ class Bot {
         if (!BinancePay::configured($details)) {
             $pdo->prepare("UPDATE orders SET status='cancelled' WHERE id=?")->execute([$oid]);
             $edit('❌ Binance Pay is not configured yet. Please contact the store admin.', $this->backHomeKb());
+            return;
+        }
+        if ($this->binancePersonal($details)) {
+            $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
+            $res = BinancePay::createReceive($details, $total, $currency, 'Order #' . $oid);
+            $data = is_array($res['data'] ?? null) ? $res['data'] : [];
+            $url = (string)($data['shareLink'] ?? '');
+            if (($res['status'] ?? '') !== 'SUCCESS' || !$this->trustedBinancePayLink($url)) {
+                error_log('Binance personal receive link failed: ' . json_encode(['code' => $res['code'] ?? '', 'message' => $res['errorMessage'] ?? $res['error'] ?? 'unknown']));
+                $pdo->prepare("UPDATE orders SET status='cancelled' WHERE id=?")->execute([$oid]);
+                $edit('❌ Binance Pay receive link could not be created. Please try again or choose another method.', $this->backHomeKb());
+                return;
+            }
+            $pdo->prepare("UPDATE orders SET binance_pay_link=? WHERE id=?")
+                ->execute([$url, $oid]);
+            $txt = "🟡 Binance Pay\n\nOrder #{$oid}\nAmount: $" . fmt_usd($total) . " {$currency}\n\nOpen the link and complete the payment in Binance. Personal Pay does not send a merchant webhook, so after paying submit the payment reference. Admin will verify and deliver the order.";
+            $kb = inline_kb([
+                [btn_url('🟡 Open Binance Pay', $url, 'success')],
+                [btn('✅ Payment Sent', 'ps:o:' . $oid, 'primary'), btn('❌ Cancel Payment', 'px:o:' . $oid, 'danger')],
+            ]);
+            $edit($txt, $kb);
             return;
         }
         $res = BinancePay::createOrder($details, $tradeNo, $total, (string)$p['name'], 'product-' . (int)$p['id']);
@@ -692,8 +724,19 @@ class Bot {
             case 'copy': $this->copyPaymentAddress($edit, $parts[1] ?? '', (int)($parts[2] ?? 0)); return;
             case 'dp': $this->startDeposit($edit, $parts[1], (float)$parts[2]); return;
             case 'ps':
-                $this->setState('await_txid:' . ($parts[1] ?? 'o') . ':' . (int)($parts[2] ?? 0));
-                tg_send($this->token, $this->chatId, '📋 Please paste your transaction ID (TXID) for #' . (int)($parts[2] ?? 0) . ':');
+                $refType = ($parts[1] ?? 'o') === 'd' ? 'd' : 'o';
+                $refId = (int)($parts[2] ?? 0);
+                $table = $refType === 'd' ? 'deposits' : 'orders';
+                $column = $refType === 'd' ? 'method' : 'payment_method';
+                $refSt = db()->prepare("SELECT {$column} FROM {$table} WHERE id=? AND bot_id=? AND user_id=?");
+                $refSt->execute([$refId, $this->bot['id'], $this->user['id']]);
+                $refRow = $refSt->fetch();
+                $personalDetails = $this->paymentDetails('binance');
+                $isPersonal = ($refRow[$column] ?? '') === 'binance' && $this->binancePersonal($personalDetails);
+                $this->setState('await_txid:' . $refType . ':' . $refId);
+                tg_send($this->token, $this->chatId, $isPersonal
+                    ? '📋 Binance Pay complete karne ke baad payment reference ya order ID #' . $refId . ' ke liye bhejo:'
+                    : '📋 Please paste your transaction ID (TXID) for #' . $refId . ':');
                 return;
             case 'pc': $this->checkPayment($edit, $parts[1] ?? 'o', (int)($parts[2] ?? 0)); return;
             case 'px': $this->cancelOrder($edit, $parts[1] ?? 'o', (int)($parts[2] ?? 0)); return;
@@ -1094,6 +1137,27 @@ class Bot {
                 $edit('❌ Binance Pay is not configured yet. Please contact the store admin.', $this->backHomeKb());
                 return;
             }
+            if ($this->binancePersonal($details)) {
+                $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
+                $res = BinancePay::createReceive($details, $usd, $currency, 'Deposit #' . $did);
+                $data = is_array($res['data'] ?? null) ? $res['data'] : [];
+                $url = (string)($data['shareLink'] ?? '');
+                if (($res['status'] ?? '') !== 'SUCCESS' || !$this->trustedBinancePayLink($url)) {
+                    error_log('Binance personal deposit receive link failed: ' . json_encode(['code' => $res['code'] ?? '', 'message' => $res['errorMessage'] ?? $res['error'] ?? 'unknown']));
+                    $pdo->prepare("UPDATE deposits SET status='failed' WHERE id=?")->execute([$did]);
+                    $edit('❌ Binance Pay receive link could not be created. Please try again or choose another method.', $this->backHomeKb());
+                    return;
+                }
+                $pdo->prepare("UPDATE deposits SET binance_pay_link=? WHERE id=?")
+                    ->execute([$url, $did]);
+                $txt = "🟡 Binance Pay\n\nDeposit #{$did}\nAmount: $" . fmt_usd($usd) . " {$currency} → " . fmt_points($points) . " points\n\nComplete the payment through Binance. Personal Pay has no merchant webhook, so submit the payment reference after paying. Admin will verify and credit the points.";
+                $kb = inline_kb([
+                    [btn_url('🟡 Open Binance Pay', $url, 'success')],
+                    [btn('✅ Payment Sent', 'ps:d:' . $did, 'primary'), btn('❌ Cancel', 'px:d:' . $did, 'danger')],
+                ]);
+                $edit($txt, $kb);
+                return;
+            }
             $res = BinancePay::createOrder($details, $tradeNo, $usd, 'Points deposit', 'deposit-' . $did);
             $data = is_array($res['data'] ?? null) ? $res['data'] : [];
             $url = (string)($data['checkoutUrl'] ?? $data['universalUrl'] ?? $data['deeplink'] ?? '');
@@ -1158,8 +1222,19 @@ class Bot {
         $st->execute([$refId, $this->bot['id'], $this->user['id']]);
         $o = $st->fetch();
         if (!$o) { $edit('❌ Payment reference not found.', $this->backHomeKb()); return; }
+        $details = $this->paymentDetails('binance');
+        if (($o['method'] ?? $o['payment_method'] ?? '') === 'binance'
+            && $this->binancePersonal($details)
+            && (string)($o['binance_pay_link'] ?? '') !== '') {
+            if ($o['txid'] !== '') {
+                $edit("⏳ Payment reference recorded for #{$refId}. Admin will verify your Personal Binance Pay payment.", $this->backHomeKb());
+            } else {
+                $this->setState('await_txid:' . $type . ':' . $refId);
+                $edit("📋 Personal Binance Pay ka automatic status check available nahi hai. Payment complete karne ke baad Binance payment reference/order ID paste karo; admin verify karega.", $this->backHomeKb());
+            }
+            return;
+        }
         if (($o['method'] ?? $o['payment_method'] ?? '') === 'binance' && (string)$o['binance_trade_no'] !== '') {
-            $details = $this->paymentDetails('binance');
             if (!BinancePay::configured($details)) {
                 $edit('❌ Binance Pay is not configured yet. Please contact the store admin.', $this->backHomeKb());
                 return;

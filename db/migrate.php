@@ -25,8 +25,10 @@ foreach (['schema.sql', 'seed.sql'] as $f) {
 foreach ([
     "ALTER TABLE orders ADD COLUMN binance_trade_no VARCHAR(32) NOT NULL DEFAULT '' AFTER txid",
     "ALTER TABLE orders ADD COLUMN binance_prepay_id VARCHAR(32) NOT NULL DEFAULT '' AFTER binance_trade_no",
+    "ALTER TABLE orders ADD COLUMN binance_pay_link TEXT NULL AFTER binance_prepay_id",
     "ALTER TABLE deposits ADD COLUMN binance_trade_no VARCHAR(32) NOT NULL DEFAULT '' AFTER txid",
     "ALTER TABLE deposits ADD COLUMN binance_prepay_id VARCHAR(32) NOT NULL DEFAULT '' AFTER binance_trade_no",
+    "ALTER TABLE deposits ADD COLUMN binance_pay_link TEXT NULL AFTER binance_prepay_id",
     "ALTER TABLE deposits MODIFY status ENUM('pending','confirmed','failed','cancelled') NOT NULL DEFAULT 'pending'",
 ] as $alter) {
     try { $pdo->exec($alter); } catch (PDOException $e) {

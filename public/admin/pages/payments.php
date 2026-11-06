@@ -7,6 +7,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $apiKey = trim((string)($_POST['binance_api_key'] ?? ''));
         $apiSecret = trim((string)($_POST['binance_api_secret'] ?? ''));
         $certPublic = trim((string)($_POST['binance_cert_public'] ?? ''));
+        $mode = post_str('binance_mode', 'merchant');
+        $currency = strtoupper(post_str('binance_currency', 'USDT'));
+        if (!in_array($mode, ['personal', 'merchant'], true)) $mode = 'merchant';
+        if (!preg_match('/^[A-Z0-9]{2,12}$/', $currency)) $currency = 'USDT';
         $st = $pdo->prepare("SELECT * FROM payment_methods WHERE bot_id=? AND code='binance'");
         $st->execute([$botId]);
         $row = $st->fetch();
@@ -19,10 +23,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($secretChanged) {
                 $details['api_secret_enc'] = enc_token($apiSecret);
             }
+            $details['mode'] = $mode;
+            $details['currency'] = $currency;
             if ($keyChanged || $secretChanged) {
                 // A rotated API key/secret must not reuse an old webhook cert.
                 unset($details['cert_sn'], $details['cert_public']);
             }
+            if ($mode === 'personal') unset($details['cert_sn'], $details['cert_public']);
             if ($certPublic !== '') $details['cert_public'] = $certPublic;
             $json = json_encode($details);
             if ($row) {
@@ -32,7 +39,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare("INSERT INTO payment_methods (bot_id, code, name, details, sort, active) VALUES (?,?,?,?,2,1)")
                     ->execute([$botId, 'binance', 'Binance Auto Pay', $json]);
             }
-            flash('Binance Pay credentials saved. Fetch the webhook certificate before going live.');
+            flash($mode === 'personal'
+                ? 'Personal Binance Pay API credentials saved. Personal payment links will require admin payment verification.'
+                : 'Binance Pay Merchant credentials saved. Fetch the webhook certificate before going live.');
         }
     } elseif ($action === 'binance_cert') {
         $st = $pdo->prepare("SELECT * FROM payment_methods WHERE bot_id=? AND code='binance'");
@@ -41,6 +50,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $details = $row ? (json_decode((string)$row['details'], true) ?: []) : [];
         if (!$row || !BinancePay::configured($details)) {
             flash('Save the Binance API identity key and secret first.', 'err');
+        } elseif (BinancePay::mode($details) === 'personal') {
+            flash('Personal Binance Pay does not use a Merchant webhook certificate.', 'err');
         } else {
             $res = BinancePay::certificates($details);
             $certs = $res['data'] ?? [];
@@ -129,6 +140,7 @@ $binanceDetails = [];
 foreach ($rows as $r) {
     if ($r['code'] === 'binance') { $binanceDetails = json_decode((string)$r['details'], true) ?: []; break; }
 }
+$binanceMode = BinancePay::mode($binanceDetails);
 
 admin_head('Payment Methods', 'payments', $botId, $bots);
 
@@ -143,9 +155,9 @@ $walletOf = function (string $code, string $key) use ($rows): string {
 };
 ?>
 <div class="card"><h3 style="margin-top:0">💰 Crypto wallets</h3>
-<p class="mut" style="margin-top:0">Put your wallet addresses here. The bot shows them to buyers at checkout — nothing is hardcoded. Leave a field empty to hide that method's address.</p>
+<p class="mut" style="margin-top:0">These fields are for manual wallet payments. Personal/Merchant Binance API mode uses the credentials below and does not need a Binance UID here.</p>
 <form method="post"><input type="hidden" name="action" value="wallets"><?= csrf_field() ?>
-<label>Binance Pay — Pay ID / UID</label>
+<label>Binance Pay UID — legacy/manual only</label>
 <input type="text" name="binance" value="<?= esc($walletOf('binance', 'uid')) ?>" placeholder="e.g. 123456789">
 <label>USDT (BEP20) — wallet address</label>
 <input type="text" name="bep20" value="<?= esc($walletOf('bep20', 'address')) ?>" placeholder="0x...">
@@ -155,21 +167,30 @@ $walletOf = function (string $code, string $key) use ($rows): string {
 <input type="text" name="ton" value="<?= esc($walletOf('ton', 'address')) ?>" placeholder="e.g. UQ...">
 <button type="submit" style="margin-top:12px">Save wallets</button></form></div>
 
-<div class="card"><h3 style="margin-top:0">🟡 Binance Pay — automatic checkout</h3>
-<p class="mut" style="margin-top:0">This is the live API integration. Buyers get a Binance checkout link; successful payments are verified by signed webhook and the Query Order API, then delivery/points are processed once only.</p>
-<p class="mut">Create the credentials in Binance Merchant Portal, paste them here, then use “Fetch webhook certificate”. Secret is encrypted before storage and is never displayed.</p>
+<div class="card"><h3 style="margin-top:0">🟡 Binance Pay API</h3>
+<p class="mut" style="margin-top:0">Select Personal Pay if you generated the key from your normal Binance app account. It creates a fixed-amount Binance receive link. Personal Pay does not provide the Merchant webhook used for automatic verification, so admin confirmation is required before delivery.</p>
+<p class="mut">Select Merchant Pay only when the credentials came from Binance Merchant Portal. Secret is encrypted before storage and is never displayed.</p>
 <form method="post"><input type="hidden" name="action" value="binance_credentials"><?= csrf_field() ?>
-<label>API identity key / API key</label>
-<input type="text" name="binance_api_key" value="<?= esc($binanceDetails['api_key'] ?? '') ?>" autocomplete="off" placeholder="Binance Pay API identity key" required>
+<label>Payment mode</label>
+<select name="binance_mode">
+<option value="personal" <?= $binanceMode === 'personal' ? 'selected' : '' ?>>Personal Pay — receive link, admin verification</option>
+<option value="merchant" <?= $binanceMode === 'merchant' ? 'selected' : '' ?>>Merchant Pay — automatic webhook verification</option>
+</select>
+<label>API Key</label>
+<input type="text" name="binance_api_key" value="<?= esc($binanceDetails['api_key'] ?? '') ?>" autocomplete="off" placeholder="Binance API Key" required>
 <label>API secret key <?= !empty($binanceDetails['api_secret_enc']) ? '(already saved — leave blank to keep)' : '' ?></label>
 <input type="password" name="binance_api_secret" value="" autocomplete="new-password" placeholder="Paste only when setting or rotating it">
-<label>Webhook public certificate (optional — fetch automatically below)</label>
-<textarea name="binance_cert_public" rows="3" class="mono" placeholder="-----BEGIN PUBLIC KEY----- ..."><?= esc($binanceDetails['cert_public'] ?? '') ?></textarea>
+<label>Receive currency</label>
+<input type="text" name="binance_currency" value="<?= esc($binanceDetails['currency'] ?? 'USDT') ?>" maxlength="12" placeholder="USDT">
 <button type="submit" style="margin-top:12px">Save Binance credentials</button></form>
+<?php if ($binanceMode === 'merchant'): ?>
 <form method="post" style="margin-top:10px"><input type="hidden" name="action" value="binance_cert"><?= csrf_field() ?>
 <button type="submit" class="btn btn2">Fetch webhook certificate from Binance</button>
 <span class="mut" style="margin-left:8px"><?= !empty($binanceDetails['cert_sn']) ? 'Certificate loaded.' : 'Certificate not loaded yet.' ?></span></form>
 <p class="mut" style="margin-bottom:0">Webhook URL to register in Binance Merchant Portal → Developer → Webhooks:<br><code><?= esc(rtrim($config['base_url'], '/') . '/binance/webhook.php') ?></code></p></div>
+<?php else: ?>
+<p class="mut" style="margin-bottom:0">Personal mode mein webhook certificate ya Merchant Portal webhook ki zarurat nahi. Payment ke baad user payment reference bhejega aur admin Orders/Deposits se verify karke delivery ya points confirm karega.</p></div>
+<?php endif; ?>
 
 <div class="card"><h3 style="margin-top:0"><?= $edit ? '✏️ Edit payment method' : '➕ Add payment method' ?></h3>
 <form method="post"><input type="hidden" name="action" value="save"><?= csrf_field() ?>

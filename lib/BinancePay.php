@@ -6,6 +6,10 @@
 final class BinancePay {
     private const BASE_URL = 'https://bpay.binanceapi.com';
 
+    public static function mode(array $details): string {
+        return (string)($details['mode'] ?? 'merchant') === 'personal' ? 'personal' : 'merchant';
+    }
+
     public static function configured(array $details): bool {
         return trim((string)($details['api_key'] ?? '')) !== ''
             && self::secret($details) !== '';
@@ -78,6 +82,18 @@ final class BinancePay {
         $body = ['merchantTradeNo' => $tradeNo];
         if ($prepayId !== '') $body['prepayId'] = $prepayId;
         return self::request($details, '/binancepay/openapi/v2/order/query', $body);
+    }
+
+    // Personal Binance Pay/Agent Pay: create a receive link for a fixed
+    // amount. This does not create a Merchant order and has no merchant
+    // webhook; personal incoming payments must be reviewed separately.
+    public static function createReceive(array $details, float $amount, string $currency = 'USDT', string $note = ''): array {
+        $body = [
+            'currency' => strtoupper(trim($currency)),
+            'amount' => number_format($amount, 2, '.', ''),
+        ];
+        if (trim($note) !== '') $body['description'] = trim($note);
+        return self::request($details, '/binancepay/openapi/user/c2c/createReceive', $body);
     }
 
     public static function certificates(array $details): array {
