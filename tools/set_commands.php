@@ -17,15 +17,18 @@ if (!$bot) { echo "bot 1 not found\n"; exit(1); }
 $token = dec_token($bot['token_enc']);
 
 $commands = [
-    ['command' => 'start',    'description' => 'Start the bot and show the main menu'],
-    ['command' => 'balance',  'description' => 'Check your balance and points'],
-    ['command' => 'deposit',  'description' => 'Buy points / deposit funds'],
-    ['command' => 'orders',   'description' => 'View your orders'],
-    ['command' => 'freebies', 'description' => 'Claim free products and methods'],
-    ['command' => 'apikey',   'description' => 'Reseller API key and documentation'],
-    ['command' => 'language', 'description' => 'Change the bot language'],
-    ['command' => 'support',  'description' => 'Support tickets'],
-    ['command' => 'help',     'description' => 'How to use the bot'],
+    // Descriptions copied exactly from the original bot's commands menu
+    // (user screenshot 11:38 PKT): friendly name + emoji on the left,
+    // /command on the right.
+    ['command' => 'start',    'description' => '🛍️ Open Shop'],
+    ['command' => 'balance',  'description' => '💰 My Balance'],
+    ['command' => 'deposit',  'description' => '💎 Buy Points'],
+    ['command' => 'orders',   'description' => '📜 My Orders'],
+    ['command' => 'freebies', 'description' => '🎁 Free Products'],
+    ['command' => 'apikey',   'description' => '🔗 Reseller API Key'],
+    ['command' => 'language', 'description' => '🌐 Change Language'],
+    ['command' => 'support',  'description' => '🎫 Support & Contact'],
+    ['command' => 'help',     'description' => '📚 How to Use'],
 ];
 
 $res = tg_api($token, 'setMyCommands', ['commands' => json_encode($commands)]);
