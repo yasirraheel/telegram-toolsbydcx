@@ -323,7 +323,7 @@ INSERT IGNORE INTO payment_methods (bot_id, code, name, details, sort) VALUES
 
 -- English texts (default language; other languages fall back to these)
 INSERT IGNORE INTO texts (bot_id, lang, `key`, `value`) VALUES
-(1, 'en', 'welcome_caption', '👤 Account User ID: {user_id}\n💳 Pay via Binance Pay – Auto Delivery'),
+(1, 'en', 'welcome_caption', '👋 Welcome to ToolsByDcx'),
 (1, 'en', 'btn_shop', '🛍️ Shop Now'),
 (1, 'en', 'btn_points', '💎 Buy Points'),
 (1, 'en', 'btn_price', '📊 Price List'),
@@ -387,7 +387,7 @@ INSERT IGNORE INTO texts (bot_id, lang, `key`, `value`) VALUES
 (1, 'ur', 'btn_back', '⬅️ واپس'),
 (1, 'ur', 'btn_home', '🏠 ہوم'),
 (1, 'ur', 'shop_title', '📁 زمرے\nبراؤز کرنے کے لیے زمرہ منتخب کریں۔'),
-(1, 'ur', 'welcome_caption', '👤 اکاؤنٹ یوزر آئی ڈی: {user_id}\n💳 بائنانس پے سے ادائیگی – خودکار ڈیلیوری');
+(1, 'ur', 'welcome_caption', '👋 ٹولز بائی ڈی سی ایکس میں خوش آمدید');
 
 -- Roman Urdu texts (main menus)
 INSERT IGNORE INTO texts (bot_id, lang, `key`, `value`) VALUES
@@ -410,4 +410,4 @@ INSERT IGNORE INTO texts (bot_id, lang, `key`, `value`) VALUES
 (1, 'ur-roman', 'btn_back', '⬅️ Wapas'),
 (1, 'ur-roman', 'btn_home', '🏠 Home'),
 (1, 'ur-roman', 'shop_title', '📁 Categories\nBrowse karne ke liye category chunein.'),
-(1, 'ur-roman', 'welcome_caption', '👤 Account User ID: {user_id}\n💳 Binance Pay se payment – Auto Delivery');
+(1, 'ur-roman', 'welcome_caption', '👋 ToolsByDcx mein khush amdeed');
