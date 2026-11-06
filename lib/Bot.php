@@ -124,13 +124,10 @@ class Bot {
             [btn($i->t('btn_loyalty'), 'm:loyal', 'primary'), btn($i->t('btn_refer'), 'm:refer', 'primary')],
             [btn($i->t('btn_support'), 'm:support', 'success'), btn($i->t('btn_warranty'), 'm:war', 'primary'), btn($i->t('btn_reviews'), 'm:rev', 'success')],
             [btn($i->t('btn_language'), 'm:lang', 'primary')],
-        ]);
-    }
-    private function replyKb(): array {
-        $i = $this->i;
-        return reply_kb([
-            [btn_kb($i->t('btn_menu'), 'success'), btn_kb($i->t('btn_api'), 'success')],
-            [btn_kb($i->t('btn_freebies'), 'success'), btn_kb($i->t('btn_howto'), 'primary')],
+            // Issue 35: Freebies / Reseller API / How to Use used to live only
+            // on the bottom reply keyboard, whose carrier bubble ("👇 🏠 Menu")
+            // the user wants gone. They now live here on the banner instead.
+            [btn($i->t('btn_freebies'), 'm:freebies', 'success'), btn($i->t('btn_api'), 'm:api', 'success'), btn($i->t('btn_howto'), 'm:howto', 'primary')],
         ]);
     }
     // Button colours copied from the original bot (Bot API 9.4 styles):
@@ -238,11 +235,11 @@ class Bot {
             $res = tg_edit_caption($this->token, $this->chatId, $m['id'], $caption, $this->mainMenuKb());
             if ($res['ok'] ?? false) {
                 $this->menuTrack((int)($res['result']['message_id'] ?? $m['id']), !empty($res['_fallback_text']) ? false : true);
-                $this->refreshReplyKb();
+                $this->dropReplyKb();
                 return;
             }
             if (str_contains((string)($res['description'] ?? ''), 'message is not modified')) {
-                $this->refreshReplyKb();
+                $this->dropReplyKb();
                 return;
             }
         }
@@ -264,7 +261,7 @@ class Bot {
             $res = tg_animation($this->token, $this->chatId, $base . '/assets/banner.gif', $caption, $this->mainMenuKb());
         }
         if ($res['ok'] ?? false) $this->menuTrack((int)$res['result']['message_id'], true);
-        $this->refreshReplyKb();
+        $this->dropReplyKb();
     }
 
     // (Re)send the persistent reply keyboard's carrier message when
@@ -274,21 +271,21 @@ class Bot {
     // The old carrier is deleted first, so there is still exactly one
     // carrier message. Called on EVERY welcome path (including the
     // already-showing one): an early return above must never skip it.
-    private function refreshReplyKb(): void {
+    // Issue 35: the reply-keyboard carrier ("👇 🏠 Menu" bubble) is gone.
+    // It used to deliver the bottom buttons, but the user wants that bubble
+    // removed. Freebies / Reseller API / How to Use now live on the banner's
+    // inline menu instead. This only deletes the old carrier message (if any)
+    // and clears the keyboard state; it never sends a new carrier.
+    private function dropReplyKb(): void {
         $d = $this->stateData();
-        $lastKb = (int)($d['kb_sent_at'] ?? 0);
-        if ($lastKb !== 0 && time() - $lastKb < 900) return;
         $oldKb = (int)($d['kb_msg_id'] ?? 0);
         if ($oldKb > 0) tg_delete($this->token, $this->chatId, $oldKb);
-        $res = tg_send($this->token, $this->chatId, '👇 ' . $this->i->t('btn_menu'), $this->replyKb());
-        if ($res['ok'] ?? false) {
-            $d['kb_msg_id'] = (int)$res['result']['message_id'];
-            $d['kb_sent_at'] = time();
-            $d['kb_sent'] = 1;
-            db()->prepare("UPDATE users SET state_data=? WHERE id=?")
-                ->execute([json_encode($d), $this->user['id']]);
-            $this->user['state_data'] = json_encode($d);
-        }
+        $d['kb_msg_id'] = 0;
+        $d['kb_sent'] = 0;
+        $d['kb_sent_at'] = 0;
+        db()->prepare("UPDATE users SET state_data=? WHERE id=?")
+            ->execute([json_encode($d), $this->user['id']]);
+        $this->user['state_data'] = json_encode($d);
     }
 
     // ---------- state machine ----------
@@ -651,7 +648,29 @@ class Bot {
             case 'rev': $this->showReviews($edit); break;
             case 'lang': $this->showLanguageCb($edit); break;
             case 'howto': $this->showHowToCb($edit); break;
+            case 'freebies': $this->showFreebiesCb($edit); break;
+            case 'api': $this->showApiCb($edit); break;
         }
+    }
+
+    private function showFreebiesCb(callable $edit): void {
+        $st = db()->prepare("SELECT * FROM freebies WHERE bot_id=? AND active=1 ORDER BY sort ASC");
+        $st->execute([$this->bot['id']]);
+        $rows = [];
+        $i = 0;
+        foreach ($st->fetchAll() as $f) $rows[] = [btn($f['title'], 'free:' . $f['id'], $this->altStyle($i++))];
+        $rows[] = [btn($this->i->t('btn_back'), 'm:home', 'primary')];
+        $edit($this->i->t('freebies_title'), inline_kb($rows));
+    }
+
+    private function showApiCb(callable $edit): void {
+        $cfg = load_config();
+        $kb = inline_kb([
+            [btn('🔑 Generate API Key', 'api:gen', 'primary')],
+            [btn_url('📄 API Documentation', rtrim($cfg['base_url'], '/') . '/api-docs', 'success')],
+            [btn($this->i->t('btn_home'), 'm:home', 'primary')],
+        ]);
+        $edit($this->i->t('api_title'), $kb);
     }
 
     private function showHowToCb(callable $edit): void {
