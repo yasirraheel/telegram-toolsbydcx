@@ -284,21 +284,18 @@ class Bot {
     // inline menu instead. This only deletes the old carrier message (if any)
     // and clears the keyboard state; it never sends a new carrier.
     // Issue 37 (final): the bottom reply keyboard (Menu / Reseller API /
-    // Freebies / How to Use) must show with NO carrier bubble. Send the
-    // carrier with the reply keyboard, pause 1s so the client registers
-    // the keyboard, then delete the carrier message at once. On mobile
-    // the keyboard is a chat-level UI element: deleting the carrier
-    // removes the bubble but the keyboard stays visible (user confirmed
-    // 11:59 PKT: emoji gone, buttons still showing, "this is good").
-    // The carrier text is normal text (not a single emoji) so it never
-    // renders as a giant emoji even briefly. The old carrier (if any) is
-    // deleted first. When kb_msg_id is 0 (no carrier, no keyboard) a
-    // fresh one is always sent, even inside the 15-minute window.
+    // Freebies / How to Use) must show with NO carrier bubble. The keyboard
+    // is sent ONCE (the very first time, kb_sent = 0) and then never again:
+    // on mobile it persists after the carrier is deleted (user confirmed
+    // 11:59 PKT: emoji gone, buttons still showing, "this is good"), so
+    // re-sending it on every /start only flashes the home emoji the user
+    // asked to stop (12:03 PKT). When it is sent, the carrier is deleted
+    // 1s later. The carrier text is normal text (not a single emoji) so it
+    // never renders as a giant emoji even briefly.
     private function showReplyKbHidden(): void {
         $d = $this->stateData();
+        if ((int)($d['kb_sent'] ?? 0) === 1) return;
         $oldKb = (int)($d['kb_msg_id'] ?? 0);
-        $lastKb = (int)($d['kb_sent_at'] ?? 0);
-        if ($oldKb > 0 && $lastKb !== 0 && time() - $lastKb < 900) return;
         if ($oldKb > 0) tg_delete($this->token, $this->chatId, $oldKb);
         $res = tg_send($this->token, $this->chatId, '👇 ' . $this->i->t('btn_menu'), $this->replyKb());
         if ($res['ok'] ?? false) {
