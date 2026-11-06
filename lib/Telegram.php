@@ -22,7 +22,10 @@ function tg_api(string $token, string $method, array $params = []): array {
     curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
     $out = curl_exec($ch);
     $dec = json_decode((string)$out, true);
-    return is_array($dec) ? $dec : ['ok' => false, 'error' => 'bad response'];
+    $res = is_array($dec) ? $dec : ['ok' => false, 'error' => 'bad response'];
+    // Temporary debug: log every Telegram API call result.
+    error_log('webhook dbg: tg_api ' . $method . ' ok=' . (!empty($res['ok']) ? '1' : '0') . ' desc=' . ($res['description'] ?? $res['error'] ?? ''));
+    return $res;
 }
 
 function tg_send(string $token, int $chatId, string $text, $markup = null, string $parse = 'HTML'): array {
