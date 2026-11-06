@@ -292,21 +292,20 @@ class Bot {
     // Issue 37 (final v3): the bottom reply keyboard (Menu / Reseller API /
     // Freebies / How to Use) NEEDS a carrier message to exist. Deleting the
     // carrier removes the keyboard with it — the user proved this 12:10 PKT
-    // by deleting the home emoji and losing the 4 buttons. The earlier
-    // send-then-delete idea was wrong: the keyboard does not survive the
-    // delete. So the carrier is KEPT (never deleted by the bot). It is
-    // re-sent whenever it is missing (kb_msg_id == 0), so the buttons come
-    // back on the next /start after the user deletes it. The carrier text
-    // is just the bot name in plain text (no emoji, no "Menu", no finger)
-    // so it is a small, clean bubble, never a giant emoji. The old carrier
-    // is deleted first when a fresh one is sent. IMPORTANT: the user must
-    // not delete this message, or the 4 buttons go away again.
+    // The reply keyboard's carrier message. The original bot does NOT send
+    // a carrier on /start — it sends only the banner, and the bottom
+    // buttons persist from the keyboard set the very first time. So the
+    // carrier is sent ONCE ever (the first /start, kb_sent == 0) and never
+    // again: no refresh, no re-send. The keyboard stays as a chat-level
+    // element, and the carrier sits in the chat history, never at the
+    // bottom. The carrier text is just the bot name in plain text (no
+    // emoji, no "Menu", no finger) so it is a small, clean bubble, never
+    // a giant emoji. IMPORTANT: the user must not delete this message, or
+    // the 4 buttons go away again — the original's buttons stay only
+    // because its carrier message is still in the chat, never deleted.
     private function showReplyKbHidden(): void {
         $d = $this->stateData();
-        $oldKb = (int)($d['kb_msg_id'] ?? 0);
-        $lastKb = (int)($d['kb_sent_at'] ?? 0);
-        if ($oldKb > 0 && $lastKb !== 0 && time() - $lastKb < 900) return;
-        if ($oldKb > 0) tg_delete($this->token, $this->chatId, $oldKb);
+        if (!empty($d['kb_sent'])) return;
         $res = tg_send($this->token, $this->chatId, 'ToolsByDcx', $this->replyKb());
         if ($res['ok'] ?? false) {
             $d['kb_msg_id'] = (int)$res['result']['message_id'];

@@ -42,7 +42,7 @@ if ($viewId) {
     <p><b><?= esc($ticket['subject'] ?: '(no subject)') ?></b> — <span class="badge <?= $ticket['status'] === 'open' ? 'warn' : 'ok' ?>"><?= esc($ticket['status']) ?></span><br>
     <span class="mut">From <a href="index.php?page=users&amp;id=<?= (int)$ticket['user_id'] ?>">@<?= esc($ticket['username'] ?: (string)$ticket['telegram_id']) ?></a> · <?= esc($ticket['created_at']) ?></span></p>
     <?php foreach ($msgs as $m): ?>
-    <div style="border-left:3px solid <?= $m['sender'] === 'admin' ? '#7c5cff' : '#00d4ff' ?>;padding:8px 12px;margin:8px 0;background:#1f1b45;border-radius:0 8px 8px 0">
+    <div style="border-left:3px solid <?= $m['sender'] === 'admin' ? '#7c5cff' : '#00bfff' ?>;padding:8px 12px;margin:8px 0;background:<?= $m['sender'] === 'admin' ? '#f0e8ff' : '#e8f4fd' ?>;border-radius:0 8px 8px 0;color:#1a1a2e">
     <span class="mut"><?= $m['sender'] === 'admin' ? '👤 Admin' : '🙋 User' ?> · <?= esc($m['created_at']) ?></span><br><?= nl2br(esc($m['message'])) ?></div>
     <?php endforeach; ?>
     <?php if (!$msgs): ?><p class="mut">No messages yet.</p><?php endif; ?>
