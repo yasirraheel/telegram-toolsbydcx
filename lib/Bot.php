@@ -68,7 +68,7 @@ class Bot {
         // Preserve the tracked menu message across state changes: the
         // state machine must never wipe the screen tracking.
         $cur = $this->stateData();
-        foreach (['menu_msg_id', 'menu_media', 'kb_sent'] as $k) {
+        foreach (['menu_msg_id', 'menu_media', 'kb_sent', 'kb_msg_id', 'kb_sent_at'] as $k) {
             if (!array_key_exists($k, $data) && array_key_exists($k, $cur)) $data[$k] = $cur[$k];
         }
         db()->prepare("UPDATE users SET state=?, state_data=? WHERE id=?")
@@ -92,14 +92,6 @@ class Bot {
         $d = $this->stateData();
         $d['menu_msg_id'] = $id;
         $d['menu_media'] = $media ? 1 : 0;
-        db()->prepare("UPDATE users SET state_data=? WHERE id=?")
-            ->execute([json_encode($d), $this->user['id']]);
-        $this->user['state_data'] = json_encode($d);
-    }
-    private function kbSent(): bool { return !empty($this->stateData()['kb_sent']); }
-    private function markKbSent(): void {
-        $d = $this->stateData();
-        $d['kb_sent'] = 1;
         db()->prepare("UPDATE users SET state_data=? WHERE id=?")
             ->execute([json_encode($d), $this->user['id']]);
         $this->user['state_data'] = json_encode($d);
@@ -260,10 +252,26 @@ class Bot {
             $res = tg_photo($this->token, $this->chatId, $base . '/assets/banner.png', $caption, $this->mainMenuKb());
         }
         if ($res['ok'] ?? false) $this->menuTrack((int)$res['result']['message_id'], true);
-        // The persistent reply keyboard only needs sending once ever.
-        if (!$this->kbSent()) {
-            tg_send($this->token, $this->chatId, '👇 ' . $this->i->t('btn_menu'), $this->replyKb());
-            $this->markKbSent();
+        // The persistent reply keyboard must stay visible on every device.
+        // It is (re)sent when needed: the first time, or when the last
+        // carrier is older than 15 minutes — mobile clients can lose the
+        // keyboard when it is dismissed or the app restarts, and the bot
+        // must be able to bring it back. The old carrier is deleted
+        // first, so there is still exactly one carrier message.
+        $d = $this->stateData();
+        $lastKb = (int)($d['kb_sent_at'] ?? 0);
+        if ($lastKb === 0 || time() - $lastKb >= 900) {
+            $oldKb = (int)($d['kb_msg_id'] ?? 0);
+            if ($oldKb > 0) tg_delete($this->token, $this->chatId, $oldKb);
+            $res = tg_send($this->token, $this->chatId, '👇 ' . $this->i->t('btn_menu'), $this->replyKb());
+            if ($res['ok'] ?? false) {
+                $d['kb_msg_id'] = (int)$res['result']['message_id'];
+                $d['kb_sent_at'] = time();
+                $d['kb_sent'] = 1;
+                db()->prepare("UPDATE users SET state_data=? WHERE id=?")
+                    ->execute([json_encode($d), $this->user['id']]);
+                $this->user['state_data'] = json_encode($d);
+            }
         }
     }
 
