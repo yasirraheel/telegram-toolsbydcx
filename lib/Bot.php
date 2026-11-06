@@ -283,27 +283,22 @@ class Bot {
     // removed. Freebies / Reseller API / How to Use now live on the banner's
     // inline menu instead. This only deletes the old carrier message (if any)
     // and clears the keyboard state; it never sends a new carrier.
-    // Issue 37: the bottom reply keyboard (Menu / Reseller API / Freebies /
-    // How to Use) must come back, but WITHOUT the "👇 🏠 Menu" carrier bubble
-    // the user wants gone. Fix: send the carrier with the reply keyboard,
-    // then delete the carrier message at once. The keyboard is a chat-level
-    // UI element in Telegram: deleting the carrier removes the bubble, but
-    // the keyboard stays visible (this is how the original bot shows bottom
-    // buttons with no carrier bubble). A short pause lets the client register
-    // the keyboard before the delete arrives. The old carrier (if any) is
-    // deleted first, and kb_msg_id is cleared so we never try to delete the
-    // already-gone carrier again.
+    // Issue 37 (revised): the bottom reply keyboard (Menu / Reseller API /
+    // Freebies / How to Use) must stay visible. Deleting the carrier message
+    // removes the keyboard with it (verified: after send-then-delete the
+    // keyboard and its toggle are gone), so the carrier is KEPT. To keep it
+    // as unobtrusive as possible its text is just a single home emoji — no
+    // "Menu" word and no pointing finger. The old carrier is deleted first,
+    // and the keyboard is refreshed only if older than 15 minutes.
     private function showReplyKbHidden(): void {
         $d = $this->stateData();
         $lastKb = (int)($d['kb_sent_at'] ?? 0);
         if ($lastKb !== 0 && time() - $lastKb < 900) return;
         $oldKb = (int)($d['kb_msg_id'] ?? 0);
         if ($oldKb > 0) tg_delete($this->token, $this->chatId, $oldKb);
-        $res = tg_send($this->token, $this->chatId, '👇 ' . $this->i->t('btn_menu'), $this->replyKb());
+        $res = tg_send($this->token, $this->chatId, '🏠', $this->replyKb());
         if ($res['ok'] ?? false) {
-            sleep(1);
-            tg_delete($this->token, $this->chatId, (int)$res['result']['message_id']);
-            $d['kb_msg_id'] = 0;
+            $d['kb_msg_id'] = (int)$res['result']['message_id'];
             $d['kb_sent_at'] = time();
             $d['kb_sent'] = 1;
             db()->prepare("UPDATE users SET state_data=? WHERE id=?")
