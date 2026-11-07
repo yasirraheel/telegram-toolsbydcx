@@ -139,6 +139,25 @@ class Bot {
         if ($res['ok'] ?? false) $this->menuTrack((int)$res['result']['message_id'], false);
     }
 
+    // Show a list screen (categories, category products, price list).
+    // The user wants no delete animation when the current screen is the
+    // welcome banner: editing the banner's caption in place is smooth and
+    // instant. The delete + fresh send only happens when the current
+    // screen is already a text message (or a product photo), where an
+    // edit in place would leave the wrong media or a stale text message.
+    // A fresh send auto-scrolls the chat to the list; an in-place edit
+    // does not, so the banner case may still need a manual scroll for a
+    // very long list — that is the trade-off the user chose over the
+    // delete animation.
+    private function showListScreen(string $txt, $kb, callable $edit): void {
+        $m = $this->menuMsg();
+        if ($m['media'] && $m['banner']) {
+            $edit($txt, $kb);
+            return;
+        }
+        $this->showTracked($txt, $kb);
+    }
+
     // Show a screen with its own image (product / category photo). The
     // tracked message is the welcome banner (an animation), and editing
     // its caption keeps the banner GIF — so a product photo can only be
@@ -935,11 +954,9 @@ class Bot {
         if ($row) $rows[] = $row;
         $rows[] = [btn($this->i->t('shop_classic'), 'pg:all:1', 'primary'), btn($this->i->t('btn_points'), 'm:points', 'success')];
         $rows[] = [btn($this->i->t('btn_back'), 'm:home', 'primary')];
-        // Long list (60+ categories): editing in place does not auto-scroll,
-        // so the bottom buttons sit below the fold and the user has to scroll
-        // down by hand. Send it fresh at the bottom instead, so the client
-        // scrolls to it and the whole list is visible.
-        $this->showTracked($this->i->t('shop_title'), inline_kb($rows));
+        // Long list: from the banner edit in place (no delete animation);
+        // from a text/photo screen send fresh at the bottom (auto-scroll).
+        $this->showListScreen($this->i->t('shop_title'), inline_kb($rows), $edit);
     }
 
     private function showCategory(callable $edit, int $catId, int $page): void {
@@ -980,9 +997,9 @@ class Bot {
         // A category with its own image shows that image, not the welcome
         // banner GIF (the banner is only the fallback when no image is set).
         if ($catImg !== '') { $this->showPhotoScreen($catImg, $txt, inline_kb($rows)); return; }
-        // Long list: send fresh at the bottom so the client auto-scrolls
-        // to it (editing in place leaves the bottom buttons below the fold).
-        $this->showTracked($txt, inline_kb($rows));
+        // Long list: from the banner edit in place (no delete animation);
+        // from a text/photo screen send fresh at the bottom (auto-scroll).
+        $this->showListScreen($txt, inline_kb($rows), $edit);
     }
 
     private function product(int $id): ?array {
@@ -1578,9 +1595,9 @@ class Bot {
         if ($page < $pages) $pg[] = btn('Next ➡️', 'pg:' . $filter . ':' . ($page + 1), 'success');
         if ($pg) $rows[] = $pg;
         $rows[] = [btn($this->i->t('btn_back'), 'm:home', 'primary')];
-        // Long list: send fresh at the bottom so the client auto-scrolls
-        // to it (editing in place leaves the bottom buttons below the fold).
-        $this->showTracked($txt, inline_kb($rows));
+        // Long list: from the banner edit in place (no delete animation);
+        // from a text/photo screen send fresh at the bottom (auto-scroll).
+        $this->showListScreen($txt, inline_kb($rows), $edit);
     }
 
     private function showOrdersCb(callable $edit, string $filter, int $page): void {
