@@ -57,18 +57,20 @@ admin_head('Categories', 'categories', $botId, $bots);
 <div><label>Active</label><select name="active"><option value="1" <?= ($edit['active'] ?? 1) ? 'selected' : '' ?>>Yes</option><option value="0" <?= isset($edit) && !$edit['active'] ? 'selected' : '' ?>>No</option></select></div>
 </div>
 <label>Image — upload a file (JPG, PNG, GIF or WebP, max 5 MB)</label><input type="file" name="image_file" accept="image/*">
-<?php if (!empty($edit['image_url'])): ?><p class="mut" style="margin:4px 0">Current: <a href="<?= esc($edit['image_url']) ?>" target="_blank" rel="noopener"><?= esc($edit['image_url']) ?></a></p><?php endif; ?>
+<?php if (!empty($edit['image_url'])): ?><p style="margin:8px 0"><img src="<?= esc($edit['image_url']) ?>" alt="Category image" style="max-width:160px;max-height:120px;border-radius:8px;border:1px solid #ddd;display:block"><a href="<?= esc($edit['image_url']) ?>" target="_blank" rel="noopener" class="mut"><?= esc($edit['image_url']) ?></a></p><?php else: ?><p class="mut" style="margin:4px 0">No image set — the welcome banner will show in the bot.</p><?php endif; ?>
 <label>…or paste an Image URL (used only when no file is uploaded)</label><input type="url" name="image_url" value="<?= esc($edit['image_url'] ?? '') ?>" placeholder="https://...">
 <button type="submit" style="margin-top:12px"><?= $edit ? 'Save changes' : 'Add category' ?></button>
 <?php if ($edit): ?><a class="btn btn2" href="index.php?page=categories">Cancel</a><?php endif; ?></form></div>
 
-<div class="card"><table><tr><th></th><th>Name</th><th>Slug</th><th>Sort</th><th>Products</th><th>Active</th><th></th></tr>
+<div class="card"><table><tr><th></th><th>Image</th><th>Name</th><th>Slug</th><th>Sort</th><th>Products</th><th>Active</th><th></th></tr>
 <?php foreach ($rows as $r): ?><tr>
-<td><?= esc($r['emoji']) ?></td><td><?= esc($r['name']) ?></td><td class="mono"><?= esc($r['slug']) ?></td>
+<td><?= esc($r['emoji']) ?></td>
+<td><?php if (!empty($r['image_url'])): ?><img src="<?= esc($r['image_url']) ?>" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #ddd"><?php else: ?><span class="mut">—</span><?php endif; ?></td>
+<td><?= esc($r['name']) ?></td><td class="mono"><?= esc($r['slug']) ?></td>
 <td><?= (int)$r['sort'] ?></td><td><?= (int)$r['products'] ?></td>
 <td><?= $r['active'] ? '<span class="badge ok">yes</span>' : '<span class="badge bad">no</span>' ?></td>
 <td><div class="row"><a class="btn btn-sm btn2" href="index.php?page=categories&amp;edit=<?= (int)$r['id'] ?>">Edit</a>
 <form method="post" class="inline"><input type="hidden" name="action" value="delete"><?= csrf_field() ?><input type="hidden" name="id" value="<?= (int)$r['id'] ?>"><button class="btn-sm btn-danger" type="submit" onclick="return confirm('Delete this category and all its products/stock?')">Delete</button></form></div></td></tr>
 <?php endforeach; ?>
-<?php if (!$rows): ?><tr><td colspan="7" class="mut">No categories yet for this bot.</td></tr><?php endif; ?></table></div>
+<?php if (!$rows): ?><tr><td colspan="8" class="mut">No categories yet for this bot.</td></tr><?php endif; ?></table></div>
 <?php admin_foot(); ?>

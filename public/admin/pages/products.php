@@ -73,7 +73,7 @@ admin_head('Products', 'products', $botId, $bots);
 </div>
 <label>Description</label><textarea name="description"><?= esc($edit['description'] ?? '') ?></textarea>
 <label>Image — upload a file (JPG, PNG, GIF or WebP, max 5 MB)</label><input type="file" name="image_file" accept="image/*">
-<?php if (!empty($edit['image_url'])): ?><p class="mut" style="margin:4px 0">Current: <a href="<?= esc($edit['image_url']) ?>" target="_blank" rel="noopener"><?= esc($edit['image_url']) ?></a></p><?php endif; ?>
+<?php if (!empty($edit['image_url'])): ?><p style="margin:8px 0"><img src="<?= esc($edit['image_url']) ?>" alt="Product image" style="max-width:160px;max-height:120px;border-radius:8px;border:1px solid #ddd;display:block"><a href="<?= esc($edit['image_url']) ?>" target="_blank" rel="noopener" class="mut"><?= esc($edit['image_url']) ?></a></p><?php else: ?><p class="mut" style="margin:4px 0">No image set — the welcome banner will show in the bot.</p><?php endif; ?>
 <label>…or paste an Image URL (used only when no file is uploaded)</label><input type="url" name="image_url" value="<?= esc($edit['image_url'] ?? '') ?>" placeholder="https://...">
 <div class="row">
 <div style="flex:1"><label>Delivery format</label><input type="text" name="delivery_format" value="<?= esc($edit['delivery_format'] ?? 'Coupon / Redemption Code') ?>"></div>
@@ -88,8 +88,9 @@ admin_head('Products', 'products', $botId, $bots);
 <option value="0">All categories</option>
 <?php foreach ($cats as $c): ?><option value="<?= (int)$c['id'] ?>" <?= $filterCat === (int)$c['id'] ? 'selected' : '' ?>><?= esc($c['name']) ?></option><?php endforeach; ?>
 </select></form>
-<table style="margin-top:12px"><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Sold</th><th>Status</th><th></th></tr>
+<table style="margin-top:12px"><tr><th>Image</th><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Sold</th><th>Status</th><th></th></tr>
 <?php foreach ($rows as $r): ?><tr>
+<td><?php if (!empty($r['image_url'])): ?><img src="<?= esc($r['image_url']) ?>" alt="" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #ddd"><?php else: ?><span class="mut">—</span><?php endif; ?></td>
 <td><?= esc($r['name']) ?><br><span class="mut"><?= esc($r['delivery_format']) ?></span></td>
 <td><?= esc($r['cat_name']) ?></td><td>$<?= esc(fmt_usd($r['price_usd'])) ?> <span class="mut">≈ Rs. <?= esc(pkr_of($botId, $r['price_usd'])) ?></span></td>
 <td><span class="badge <?= (int)$r['stock'] === 0 ? 'bad' : ((int)$r['stock'] < 5 ? 'warn' : 'ok') ?>"><?= (int)$r['stock'] ?></span></td>
@@ -101,5 +102,5 @@ admin_head('Products', 'products', $botId, $bots);
 <form method="post" class="inline"><input type="hidden" name="action" value="delete"><?= csrf_field() ?><input type="hidden" name="id" value="<?= (int)$r['id'] ?>"><button class="btn-sm btn-danger" type="submit" onclick="return confirm('Delete this product and all its stock?')">Delete</button></form>
 </div></td></tr>
 <?php endforeach; ?>
-<?php if (!$rows): ?><tr><td colspan="7" class="mut">No products yet for this bot.</td></tr><?php endif; ?></table></div>
+<?php if (!$rows): ?><tr><td colspan="8" class="mut">No products yet for this bot.</td></tr><?php endif; ?></table></div>
 <?php admin_foot(); ?>
