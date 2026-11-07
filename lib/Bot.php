@@ -551,6 +551,7 @@ class Bot {
             $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
             $txt = "🟡 Binance Pay\n\nOrder #{$oid}\nAmount: $" . fmt_usd($total) . " {$currency}\n\nSend exactly $" . fmt_usd($total) . " {$currency} to this Binance Pay UID in your Binance app:\n\n<code>{$uid}</code>\n\nAfter sending, tap Check Payment. The bot checks the payment automatically and delivers when the matching payment is found.";
             $kb = inline_kb([
+                [btn('📋 Copy UID', 'copy:o:' . $oid, 'primary'), btn('📋 Copy Details', 'copyinfo:o:' . $oid, 'success')],
                 [btn('🔍 Check Payment', 'pc:o:' . $oid, 'primary'), btn('❌ Cancel Payment', 'px:o:' . $oid, 'danger')],
             ]);
             $edit($txt, $kb);
@@ -729,6 +730,7 @@ class Bot {
                 }
                 return;
             case 'copy': $this->copyPaymentAddress($edit, $parts[1] ?? '', (int)($parts[2] ?? 0)); return;
+            case 'copyinfo': $this->copyPaymentDetails($edit, $parts[1] ?? '', (int)($parts[2] ?? 0)); return;
             case 'dp': $this->startDeposit($edit, $parts[1], (float)$parts[2]); return;
             case 'ps':
                 $refType = ($parts[1] ?? 'o') === 'd' ? 'd' : 'o';
@@ -1158,6 +1160,7 @@ class Bot {
                 $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
                 $txt = "🟡 Binance Pay\n\nDeposit #{$did}\nAmount: $" . fmt_usd($usd) . " {$currency} → " . fmt_points($points) . " points\n\nSend exactly $" . fmt_usd($usd) . " {$currency} to this Binance Pay UID in your Binance app:\n\n<code>{$uid}</code>\n\nAfter sending, tap Check Payment. The bot checks the payment automatically and credits your points when the matching payment is found.";
                 $kb = inline_kb([
+                    [btn('📋 Copy UID', 'copy:d:' . $did, 'primary'), btn('📋 Copy Details', 'copyinfo:d:' . $did, 'success')],
                     [btn('🔍 Check Payment', 'pc:d:' . $did, 'primary'), btn('❌ Cancel', 'px:d:' . $did, 'danger')],
                 ]);
                 $edit($txt, $kb);
@@ -1218,6 +1221,38 @@ class Bot {
         $addr = $details['address'] ?? $details['uid'] ?? '';
         if ($addr === '') { $edit('❌ No wallet address is set for this method yet.', $this->backHomeKb()); return; }
         tg_send($this->token, $this->chatId, "📋 Payment address — tap to copy:\n\n<code>" . esc($addr) . "</code>");
+    }
+
+    // Copy the full Binance Pay payment details (UID + amount + currency)
+    // in one code block, so the user can tap it to copy everything at once
+    // and paste it into the Binance app. There is no auto-fill payment
+    // link to copy for a personal account (Binance Pay links need a
+    // server-generated token, only the merchant API or the Merchant Portal
+    // can create one), so the UID + amount is the copyable payment info.
+    private function copyPaymentDetails(callable $edit, string $type, int $refId): void {
+        $pdo = db();
+        if ($type === 'd') {
+            $st = $pdo->prepare("SELECT method, amount_usd FROM deposits WHERE id=? AND bot_id=? AND user_id=?");
+            $st->execute([$refId, $this->bot['id'], $this->user['id']]);
+            $row = $st->fetch();
+            $method = $row['method'] ?? '';
+            $amount = (float)($row['amount_usd'] ?? 0);
+        } else {
+            $st = $pdo->prepare("SELECT payment_method, total_usd FROM orders WHERE id=? AND bot_id=? AND user_id=?");
+            $st->execute([$refId, $this->bot['id'], $this->user['id']]);
+            $row = $st->fetch();
+            $method = $row['payment_method'] ?? '';
+            $amount = (float)($row['total_usd'] ?? 0);
+        }
+        if ($method === '') { $edit('❌ Reference not found.', $this->backHomeKb()); return; }
+        $pm = $pdo->prepare("SELECT details FROM payment_methods WHERE bot_id=? AND code=?");
+        $pm->execute([$this->bot['id'], $method]);
+        $details = json_decode($pm->fetch()['details'] ?? '{}', true) ?: [];
+        $uid = trim((string)($details['uid'] ?? $details['address'] ?? ''));
+        if ($uid === '') { $edit('❌ No wallet address is set for this method yet.', $this->backHomeKb()); return; }
+        $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
+        $info = "Binance Pay UID: {$uid}\nAmount: $" . fmt_usd($amount) . " {$currency}";
+        tg_send($this->token, $this->chatId, "📋 Payment details — tap to copy:\n\n<code>" . esc($info) . "</code>");
     }
 
     private function checkPayment(callable $edit, string $type, int $refId): void {
