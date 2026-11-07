@@ -125,3 +125,12 @@ function btn_url(string $text, string $url, ?string $style = null, ?string $icon
     if ($icon !== null) $b['icon_custom_emoji_id'] = $icon;
     return $b;
 }
+// Bot API 7.10+: one-tap copy button (inline keyboards only). Pressing it
+// copies $copyText straight to the clipboard — no callback reaches the bot
+// and no extra message is sent. $copyText must be 1-256 characters.
+function btn_copy(string $text, string $copyText, ?string $style = null, ?string $icon = null): array {
+    $b = ['text' => $text, 'copy_text' => ['text' => $copyText]];
+    if ($style !== null) $b['style'] = $style;
+    if ($icon !== null) $b['icon_custom_emoji_id'] = $icon;
+    return $b;
+}
