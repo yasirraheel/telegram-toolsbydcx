@@ -545,7 +545,7 @@ class Bot {
                 return true;
             }
             if (!($res['found'] ?? false)) {
-                tg_send($this->token, $this->chatId, '❌ No Binance Pay payment found for Order ID ' . esc($orderId) . ' with the expected amount. Check that you copied the Order ID Binance showed after paying, and that the payment was sent to the right Binance Pay UID.');
+                tg_send($this->token, $this->chatId, '❌ No Binance Pay payment found for Order ID ' . esc($orderId) . ' with the expected amount, currency and Binance Pay UID. Check that you copied the Order ID Binance showed after paying, and that the payment was sent to the right Binance Pay UID.', inline_kb([[btn('🔍 Check Payment', 'pc:' . $type . ':' . $oid, 'primary'), btn($this->i->t('btn_home'), 'm:home', 'success')]]));
                 return true;
             }
             $transaction = is_array($res['transaction'] ?? null) ? $res['transaction'] : [];
@@ -656,8 +656,9 @@ class Bot {
     // and the merchant order endpoint needs a merchant key — so the bot
     // does not try to create a payment link. Instead it shows the owner's
     // Binance Pay UID and the exact amount, the customer sends it manually
-    // in the Binance app, and the bot verifies the payment automatically
-    // from the Pay transaction history (findIncomingPayment).
+    // in the Binance app, and the bot verifies the payment ONLY by the
+    // Binance Order ID the customer pastes (findPaymentByOrderId) — the
+    // UID, currency, exact amount and Order ID must all match.
     private function binancePersonal(array $details): bool {
         return true;
     }
@@ -694,7 +695,7 @@ class Bot {
                 return;
             }
             $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
-            $txt = "🟡 Binance Pay\n\nOrder #{$oid}\nAmount: $" . fmt_usd($total) . " {$currency}\n\nSend exactly $" . fmt_usd($total) . " {$currency} to this Binance Pay UID in your Binance app:\n\n<code>{$uid}</code>\n\nAfter sending, tap Check Payment. The bot checks the payment automatically and delivers when the matching payment is found.";
+            $txt = "🟡 Binance Pay\n\nOrder #{$oid}\nAmount: $" . fmt_usd($total) . " {$currency}\n\nSend exactly $" . fmt_usd($total) . " {$currency} to this Binance Pay UID in your Binance app:\n\n<code>{$uid}</code>\n\nAfter sending, tap Check Payment and paste the Order ID Binance showed you. The bot verifies that Order ID (it must match this amount, currency and the store's Binance Pay UID) and delivers when it matches.";
             // copy_text buttons copy straight to the clipboard on tap —
             // no callback, no extra message. Copy Details fits the 256
             // char limit (UID + amount + currency).
@@ -1366,7 +1367,7 @@ class Bot {
                     return;
                 }
                 $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
-                $txt = "🟡 Binance Pay\n\nDeposit #{$did}\nAmount: $" . fmt_usd($usd) . " {$currency} → " . fmt_points($points) . " points\n\nSend exactly $" . fmt_usd($usd) . " {$currency} to this Binance Pay UID in your Binance app:\n\n<code>{$uid}</code>\n\nAfter sending, tap Check Payment. The bot checks the payment automatically and credits your points when the matching payment is found.";
+                $txt = "🟡 Binance Pay\n\nDeposit #{$did}\nAmount: $" . fmt_usd($usd) . " {$currency} → " . fmt_points($points) . " points\n\nSend exactly $" . fmt_usd($usd) . " {$currency} to this Binance Pay UID in your Binance app:\n\n<code>{$uid}</code>\n\nAfter sending, tap Check Payment and paste the Order ID Binance showed you. The bot verifies that Order ID (it must match this amount, currency and the store's Binance Pay UID) and credits your points when it matches.";
                 $copyDetails = "Binance Pay UID: {$uid}\nAmount: $" . fmt_usd($usd) . " {$currency}";
                 $kb = inline_kb([
                     [btn_copy('📋 Copy UID', $uid, 'primary'), btn_copy('📋 Copy Details', $copyDetails, 'success')],
@@ -1442,47 +1443,17 @@ class Bot {
         $o = $st->fetch();
         if (!$o) { $edit('❌ Payment reference not found.', $this->backHomeKb()); return; }
         $details = $this->paymentDetails('binance');
-        // Personal account: verify from the Pay transaction history. There
-        // is no API-created pay link in personal mode (the customer sends
-        // to the owner's UID), so this must not require binance_pay_link.
+        // Personal account: verification is ONLY by the Binance Order ID
+        // the sender pastes — no automatic amount match. The bot checks
+        // that exact Order ID against the Pay history and confirms only
+        // when the owner's UID, the currency, the exact amount and the
+        // Order ID all match (findPaymentByOrderId). There is no
+        // API-created pay link in personal mode (the customer sends to the
+        // owner's UID), so this must not require binance_pay_link.
         if (($o['method'] ?? $o['payment_method'] ?? '') === 'binance'
             && $this->binancePersonal($details)) {
-            $createdMs = strtotime((string)$o['created_at']) * 1000;
-            $startMs = max(0, $createdMs - 120000);
-            $endMs = min((int)round(microtime(true) * 1000), $createdMs + (30 * 60 * 1000));
-            $expectedAmount = (float)($type === 'd' ? $o['amount_usd'] : $o['total_usd']);
-            $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
-            $usedSt = $pdo->prepare("SELECT txid FROM orders WHERE bot_id=? AND txid<>'' UNION ALL SELECT txid FROM deposits WHERE bot_id=? AND txid<>''");
-            $usedSt->execute([$this->bot['id'], $this->bot['id']]);
-            $usedTxids = array_values(array_filter(array_map('strval', $usedSt->fetchAll(PDO::FETCH_COLUMN))));
-            $res = BinancePay::findIncomingPayment($details, $expectedAmount, $currency, $startMs, $endMs, $usedTxids);
-            if (!($res['ok'] ?? false)) {
-                error_log('Binance personal history check failed: ' . json_encode(['id' => $refId, 'code' => $res['code'] ?? '', 'error' => $res['error'] ?? 'unknown']));
-                $edit('⏳ Binance Pay verification is temporarily unavailable. Please tap Check Payment again shortly.', $this->checkPaymentKb($type, $refId));
-                return;
-            }
-            if (!($res['found'] ?? false)) {
-                // No match by amount yet. Let the user paste the Order ID
-                // Binance showed them after paying (a Binance Pay transfer
-                // to a UID has an Order ID, not a blockchain TXID) — the
-                // bot will verify that exact Order ID instead.
-                $this->setState('await_binance_order:' . $type . ':' . $refId);
-                $edit('⏳ Matching Binance Pay transaction not found yet. Complete the payment in Binance, wait a few seconds, then tap Check Payment again.\n\nOr paste the Order ID Binance showed you after paying (find it in your Binance app under Pay history) and the bot will verify that exact Order ID.', $this->checkPaymentKb($type, $refId));
-                return;
-            }
-            $transaction = is_array($res['transaction'] ?? null) ? $res['transaction'] : [];
-            $txid = trim((string)($transaction['transactionId'] ?? ''));
-            if ($txid === '') {
-                $edit('⏳ Binance Pay returned a payment without a transaction ID. Please try Check Payment again.', $this->checkPaymentKb($type, $refId));
-                return;
-            }
-            if ($type === 'd') {
-                $this->confirmBinanceDeposit($refId, $txid);
-            } else {
-                $p = $this->product((int)$o['product_id']);
-                if (!$p) { $edit('❌ Product no longer exists. Contact support with this order number.', $this->backHomeKb()); return; }
-                $this->fulfillExistingOrder($refId, $p, (int)$o['qty'], $txid, $edit);
-            }
+            $this->setState('await_binance_order:' . $type . ':' . $refId);
+            $edit('🔍 Binance Pay verification\n\nPaste the Order ID Binance showed you after paying (find it in your Binance app under Pay history). The bot will verify that Order ID — it must match this order\'s amount, currency and the store\'s Binance Pay UID — and confirm your payment.', $this->backHomeKb());
             return;
         }
         if (($o['method'] ?? $o['payment_method'] ?? '') === 'binance' && (string)$o['binance_trade_no'] !== '') {
