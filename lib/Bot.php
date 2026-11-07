@@ -545,7 +545,7 @@ class Bot {
                 return true;
             }
             if (!($res['found'] ?? false)) {
-                tg_send($this->token, $this->chatId, '❌ No Binance Pay payment found for Order ID ' . esc($orderId) . ' with the expected amount, currency and Binance Pay UID. Check that you copied the Order ID Binance showed after paying, and that the payment was sent to the right Binance Pay UID.', inline_kb([[btn('🔍 Check Payment', 'pc:' . $type . ':' . $oid, 'primary'), btn($this->i->t('btn_home'), 'm:home', 'success')]]));
+                tg_send($this->token, $this->chatId, '❌ No payment found for Order ID ' . esc($orderId) . '. Check the Order ID and try again.', inline_kb([[btn('🔍 Check Payment', 'pc:' . $type . ':' . $oid, 'primary'), btn($this->i->t('btn_home'), 'm:home', 'success')]]));
                 return true;
             }
             $transaction = is_array($res['transaction'] ?? null) ? $res['transaction'] : [];
@@ -695,7 +695,7 @@ class Bot {
                 return;
             }
             $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
-            $txt = "🟡 Binance Pay\n\nOrder #{$oid}\nAmount: $" . fmt_usd($total) . " {$currency}\n\nSend exactly $" . fmt_usd($total) . " {$currency} to this Binance Pay UID in your Binance app:\n\n<code>{$uid}</code>\n\nAfter sending, tap Check Payment and paste the Order ID Binance showed you. The bot verifies that Order ID (it must match this amount, currency and the store's Binance Pay UID) and delivers when it matches.";
+            $txt = "🟡 Binance Pay\n\nOrder #{$oid}\nAmount: $" . fmt_usd($total) . " {$currency}\n\nSend exactly $" . fmt_usd($total) . " {$currency} to this Binance Pay UID in your Binance app:\n\n<code>{$uid}</code>\n\nAfter sending, tap Check Payment and paste the Order ID Binance showed you.";
             // copy_text buttons copy straight to the clipboard on tap —
             // no callback, no extra message. Copy Details fits the 256
             // char limit (UID + amount + currency).
@@ -1367,7 +1367,7 @@ class Bot {
                     return;
                 }
                 $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
-                $txt = "🟡 Binance Pay\n\nDeposit #{$did}\nAmount: $" . fmt_usd($usd) . " {$currency} → " . fmt_points($points) . " points\n\nSend exactly $" . fmt_usd($usd) . " {$currency} to this Binance Pay UID in your Binance app:\n\n<code>{$uid}</code>\n\nAfter sending, tap Check Payment and paste the Order ID Binance showed you. The bot verifies that Order ID (it must match this amount, currency and the store's Binance Pay UID) and credits your points when it matches.";
+                $txt = "🟡 Binance Pay\n\nDeposit #{$did}\nAmount: $" . fmt_usd($usd) . " {$currency} → " . fmt_points($points) . " points\n\nSend exactly $" . fmt_usd($usd) . " {$currency} to this Binance Pay UID in your Binance app:\n\n<code>{$uid}</code>\n\nAfter sending, tap Check Payment and paste the Order ID Binance showed you.";
                 $copyDetails = "Binance Pay UID: {$uid}\nAmount: $" . fmt_usd($usd) . " {$currency}";
                 $kb = inline_kb([
                     [btn_copy('📋 Copy UID', $uid, 'primary'), btn_copy('📋 Copy Details', $copyDetails, 'success')],
@@ -1453,7 +1453,7 @@ class Bot {
         if (($o['method'] ?? $o['payment_method'] ?? '') === 'binance'
             && $this->binancePersonal($details)) {
             $this->setState('await_binance_order:' . $type . ':' . $refId);
-            $edit('🔍 Binance Pay verification\n\nPaste the Order ID Binance showed you after paying (find it in your Binance app under Pay history). The bot will verify that Order ID — it must match this order\'s amount, currency and the store\'s Binance Pay UID — and confirm your payment.', $this->backHomeKb());
+            $edit('🔍 Paste your Binance Order ID below 👇', $this->backHomeKb());
             return;
         }
         if (($o['method'] ?? $o['payment_method'] ?? '') === 'binance' && (string)$o['binance_trade_no'] !== '') {
