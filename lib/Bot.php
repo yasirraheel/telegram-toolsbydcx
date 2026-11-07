@@ -1087,7 +1087,7 @@ class Bot {
         // (db/add_image_url.sql) has not been run — default to '' so the
         // category still opens instead of the query failing.
         $catImg = trim((string)($catRow['image_url'] ?? ''));
-        $txt = "📂 📦 " . $catEmoji . " " . esc($catName) . "\n——————————\nPage {$page}/{$pages} 🎉\n";
+        $txt = "📂 📦 " . $catEmoji . " " . esc($catName) . "\n——————————\n" . ($pages > 1 ? "Page {$page}/{$pages} 🎉\n" : "");
         $rows = [];
         $i = 0;
         foreach ($st->fetchAll() as $p) {
@@ -1869,7 +1869,7 @@ class Bot {
             $rows[] = [btn($p['name'] . ' — $' . $p['price_usd'], 'tic:prod:' . (int)$p['id'], $this->altStyle($i++))];
         }
         if (!$rows) $txt .= "\n\nNo products match your search.";
-        $txt .= "\n\nPage {$page} of {$pages} · {$total} products";
+        if ($pages > 1) $txt .= "\n\nPage {$page} of {$pages} · {$total} products";
         $nav = [btn('🔍 Search Product', 'tic:search', 'primary')];
         if ($page > 1) $nav[] = btn('⬅️ Prev', 'tic:page:' . ($page - 1), 'primary');
         if ($page < $pages) $nav[] = btn('Next ➡️', 'tic:page:' . ($page + 1), 'success');
