@@ -146,11 +146,12 @@ final class BinancePay {
     // shows the sender after paying (there is no blockchain TXID for a
     // Binance Pay transfer to a UID — the Order ID is the identifier).
     // The pasted id is matched against the row's orderId OR transactionId
-    // (tolerant fallback: some rows only carry one of them), and the same
-    // checks as the automatic match still apply — currency, exact amount,
-    // receiver UID, time window, order type, and not already used. A
-    // worthless token can never match: its currency is not USDT.
-    public static function findPaymentByOrderId(array $details, string $orderId, float $amount, string $currency, int $startMs, int $endMs, array $excludeTxids = []): array {
+    // (tolerant fallback: some rows only carry one of them), and it
+    // confirms only when the currency, receiver UID, time window, order
+    // type and not-already-used all match. The exact amount is NOT
+    // checked (owner's decision: the Order ID verified from Binance is
+    // enough). A worthless token can never match: its currency is not USDT.
+    public static function findPaymentByOrderId(array $details, string $orderId, string $currency, int $startMs, int $endMs, array $excludeTxids = []): array {
         $uid = trim((string)($details['uid'] ?? ''));
         if ($uid === '') return ['ok' => false, 'error' => 'Binance Pay UID is required for automatic verification.'];
         $orderId = trim($orderId);
@@ -172,9 +173,7 @@ final class BinancePay {
             foreach (self::paymentFunds($row) as $fund) {
                 if (strtoupper((string)($fund['currency'] ?? '')) !== $currency) continue;
                 if ((float)($fund['amount'] ?? 0) <= 0) continue;
-                if (abs((float)$fund['amount'] - $amount) <= 0.00000001) {
-                    return ['ok' => true, 'found' => true, 'transaction' => $row];
-                }
+                return ['ok' => true, 'found' => true, 'transaction' => $row];
             }
         }
         return ['ok' => true, 'found' => false];

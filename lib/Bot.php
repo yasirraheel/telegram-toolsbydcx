@@ -533,12 +533,11 @@ class Bot {
             $createdMs = strtotime((string)$o['created_at']) * 1000;
             $startMs = max(0, $createdMs - 120000);
             $endMs = min((int)round(microtime(true) * 1000), $createdMs + (30 * 60 * 1000));
-            $expectedAmount = (float)($type === 'd' ? $o['amount_usd'] : $o['total_usd']);
             $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
             $usedSt = db()->prepare("SELECT txid FROM orders WHERE bot_id=? AND txid<>'' UNION ALL SELECT txid FROM deposits WHERE bot_id=? AND txid<>''");
             $usedSt->execute([$this->bot['id'], $this->bot['id']]);
             $usedTxids = array_values(array_filter(array_map('strval', $usedSt->fetchAll(PDO::FETCH_COLUMN))));
-            $res = BinancePay::findPaymentByOrderId($details, $orderId, $expectedAmount, $currency, $startMs, $endMs, $usedTxids);
+            $res = BinancePay::findPaymentByOrderId($details, $orderId, $currency, $startMs, $endMs, $usedTxids);
             $this->setState('');
             if (!($res['ok'] ?? false)) {
                 tg_send($this->token, $this->chatId, '⏳ Binance Pay verification is temporarily unavailable. Please try Check Payment again shortly.');
@@ -658,7 +657,8 @@ class Bot {
     // Binance Pay UID and the exact amount, the customer sends it manually
     // in the Binance app, and the bot verifies the payment ONLY by the
     // Binance Order ID the customer pastes (findPaymentByOrderId) — the
-    // UID, currency, exact amount and Order ID must all match.
+    // UID, currency and Order ID must all match (the exact amount is not
+    // checked, by the owner's decision).
     private function binancePersonal(array $details): bool {
         return true;
     }
@@ -1444,10 +1444,11 @@ class Bot {
         if (!$o) { $edit('❌ Payment reference not found.', $this->backHomeKb()); return; }
         $details = $this->paymentDetails('binance');
         // Personal account: verification is ONLY by the Binance Order ID
-        // the sender pastes — no automatic amount match. The bot checks
+        // the sender pastes — no automatic amount match, and the exact
+        // amount is not checked either (owner's decision). The bot checks
         // that exact Order ID against the Pay history and confirms only
-        // when the owner's UID, the currency, the exact amount and the
-        // Order ID all match (findPaymentByOrderId). There is no
+        // when the owner's UID, the currency and the Order ID all match
+        // (findPaymentByOrderId). There is no
         // API-created pay link in personal mode (the customer sends to the
         // owner's UID), so this must not require binance_pay_link.
         if (($o['method'] ?? $o['payment_method'] ?? '') === 'binance'
