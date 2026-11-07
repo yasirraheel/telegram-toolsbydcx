@@ -941,6 +941,7 @@ class Bot {
             case 'pxc': $this->cancelOrder($edit, $parts[1] ?? 'o', (int)($parts[2] ?? 0)); return;
             case 'ord': $this->showOrdersCb($edit, $parts[1], (int)($parts[2] ?? 1)); return;
             case 'o': $this->showOrderDetail($edit, (int)$parts[1]); return;
+            case 'd': $this->showDepositDetail($edit, (int)$parts[1]); return;
             case 'tic':
                 $sub = $parts[1] ?? '';
                 if ($sub === 'new') {
@@ -1758,8 +1759,62 @@ class Bot {
         $rows = $st->fetchAll();
         if (!$rows) { $edit($this->i->t('txns_empty'), $this->backHomeKb()); return; }
         $txt = "🔄 Transactions\n";
-        foreach ($rows as $d) $txt .= "\n#{$d['id']} — \${$d['amount_usd']} ({$d['points']} pts) — {$d['method']} — {$d['status']}";
-        $edit($txt, $this->backHomeKb());
+        $kbRows = [];
+        foreach ($rows as $d) {
+            $line = "#{$d['id']} — \${$d['amount_usd']} ({$d['points']} pts) — {$d['method']} — {$d['status']}";
+            if ($d['status'] === 'pending') {
+                // A pending deposit is tappable: it opens the deposit
+                // detail with Check Payment + Cancel, so it never sits
+                // stuck with no way to pay or cancel it.
+                $txt .= "\n" . $line;
+                $kbRows[] = [btn("💎 Deposit #{$d['id']} — \${$d['amount_usd']} — Pay / Cancel", 'd:' . (int)$d['id'], 'primary')];
+            } else {
+                $txt .= "\n" . $line;
+            }
+        }
+        $txt .= "\n\nTap a pending deposit to pay or cancel it.";
+        $kbRows[] = [btn($this->i->t('btn_back'), 'm:home', 'primary')];
+        $edit($txt, inline_kb($kbRows));
+    }
+
+    // Deposit detail: same Pay + Cancel workflow as order detail, so a
+    // pending deposit is never stuck. Confirmed/failed/cancelled deposits
+    // show no actions, just Back.
+    private function showDepositDetail(callable $edit, int $did): void {
+        $st = db()->prepare("SELECT * FROM deposits WHERE id=? AND bot_id=? AND user_id=?");
+        $st->execute([$did, $this->bot['id'], $this->user['id']]);
+        $d = $st->fetch();
+        if (!$d) { $edit('❌ Deposit not found.', $this->backHomeKb()); return; }
+        $status = (string)$d['status'];
+        $method = (string)$d['method'];
+        $txt = "💎 Deposit #{$d['id']}\n\nAmount: \${$d['amount_usd']}\nPoints: " . fmt_points($d['points']) . "\nStatus: {$status}\nPayment: {$method}\nDate: {$d['created_at']}";
+        if (!empty($d['txid'])) $txt .= "\nTXID: <code>" . esc($d['txid']) . "</code>";
+        $kbRows = [];
+        if ($status === 'pending') {
+            if ($method === 'binance') {
+                $details = $this->paymentDetails('binance');
+                $uid = trim((string)($details['uid'] ?? ''));
+                $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
+                if ($uid !== '') $txt .= "\n\nSend \$" . fmt_usd($d['amount_usd']) . " {$currency} to Binance Pay UID:\n<code>{$uid}</code>";
+                $kbRows[] = [btn('🔍 Check Payment', 'pc:d:' . $d['id'], 'primary'), btn('❌ Cancel Payment', 'px:d:' . $d['id'], 'danger')];
+            } elseif (in_array($method, ['bep20', 'sol', 'ton'], true)) {
+                $details = $this->paymentDetails($method);
+                $addr = trim((string)($details['address'] ?? ''));
+                if ($addr !== '') $txt .= "\n\nSend \$" . fmt_usd($d['amount_usd']) . " USDT (" . strtoupper($method) . ") to:\n<code>{$addr}</code>";
+                $kbRows[] = [btn('🔍 Check Payment', 'pc:d:' . $d['id'], 'primary'), btn('❌ Cancel Payment', 'px:d:' . $d['id'], 'danger')];
+            } elseif ($method === 'stars') {
+                $txt .= "\n\nComplete the Telegram Stars invoice in this chat to pay, or cancel below.";
+                $kbRows[] = [btn('❌ Cancel Payment', 'px:d:' . $d['id'], 'danger')];
+            } else {
+                $txt .= "\n\nYour payment is being processed. You will be notified once it is confirmed.";
+                $kbRows[] = [btn('❌ Cancel Payment', 'px:d:' . $d['id'], 'danger')];
+            }
+            if (!empty($d['txid'])) {
+                $txt .= "\n\n⏳ Your payment reference was received. Waiting for admin approval.";
+            }
+        }
+        $kbRows[] = [btn($this->i->t('btn_back'), 'm:txns', 'primary')];
+        $edit($txt, inline_kb($kbRows));
     }
 
     private function showLoyalty(callable $edit): void {
