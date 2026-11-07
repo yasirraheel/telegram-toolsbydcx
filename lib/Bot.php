@@ -218,6 +218,15 @@ class Bot {
         return inline_kb([[btn($this->i->t('btn_back'), 'm:home', 'primary'), btn($this->i->t('btn_home'), 'm:home', 'success')]]);
     }
 
+    // Retry screen for a payment check: a Check Payment button on top, so
+    // the user can tap it again right here instead of going back to find it.
+    private function checkPaymentKb(string $type, int $refId): array {
+        return inline_kb([
+            [btn('🔍 Check Payment', 'pc:' . $type . ':' . $refId, 'primary')],
+            [btn($this->i->t('btn_back'), 'm:home', 'primary'), btn($this->i->t('btn_home'), 'm:home', 'success')],
+        ]);
+    }
+
     // ---------- messages ----------
     private function onMessage(array $msg): void {
         $this->chatId = (int)$msg['chat']['id'];
@@ -1350,17 +1359,17 @@ class Bot {
             $res = BinancePay::findIncomingPayment($details, $expectedAmount, $currency, $startMs, $endMs, $usedTxids);
             if (!($res['ok'] ?? false)) {
                 error_log('Binance personal history check failed: ' . json_encode(['id' => $refId, 'code' => $res['code'] ?? '', 'error' => $res['error'] ?? 'unknown']));
-                $edit('⏳ Binance Pay verification is temporarily unavailable. Please tap Check Payment again shortly.', $this->backHomeKb());
+                $edit('⏳ Binance Pay verification is temporarily unavailable. Please tap Check Payment again shortly.', $this->checkPaymentKb($type, $refId));
                 return;
             }
             if (!($res['found'] ?? false)) {
-                $edit('⏳ Matching Binance Pay transaction not found yet. Complete the payment in Binance, wait a few seconds, then tap Check Payment again.', $this->backHomeKb());
+                $edit('⏳ Matching Binance Pay transaction not found yet. Complete the payment in Binance, wait a few seconds, then tap Check Payment again.', $this->checkPaymentKb($type, $refId));
                 return;
             }
             $transaction = is_array($res['transaction'] ?? null) ? $res['transaction'] : [];
             $txid = trim((string)($transaction['transactionId'] ?? ''));
             if ($txid === '') {
-                $edit('⏳ Binance Pay returned a payment without a transaction ID. Please try Check Payment again.', $this->backHomeKb());
+                $edit('⏳ Binance Pay returned a payment without a transaction ID. Please try Check Payment again.', $this->checkPaymentKb($type, $refId));
                 return;
             }
             if ($type === 'd') {
@@ -1381,7 +1390,7 @@ class Bot {
             $data = is_array($res['data'] ?? null) ? $res['data'] : [];
             if (($res['status'] ?? '') !== 'SUCCESS' || !$data) {
                 error_log('Binance query failed: ' . json_encode(['code' => $res['code'] ?? '', 'message' => $res['errorMessage'] ?? $res['error'] ?? 'unknown']));
-                $edit('⏳ Binance Pay is temporarily unavailable. Please tap Check Payment again in a moment.', $this->backHomeKb());
+                $edit('⏳ Binance Pay is temporarily unavailable. Please tap Check Payment again in a moment.', $this->checkPaymentKb($type, $refId));
                 return;
             }
             $status = (string)($data['status'] ?? '');
@@ -1407,7 +1416,7 @@ class Bot {
                 $edit('❌ Binance payment status: ' . $status . '. You can start a new payment from the product screen.', $this->backHomeKb());
                 return;
             }
-            $edit('⏳ Binance payment status: ' . ($status ?: 'PENDING') . '. Complete the payment, then check again.', $this->backHomeKb());
+            $edit('⏳ Binance payment status: ' . ($status ?: 'PENDING') . '. Complete the payment, then check again.', $this->checkPaymentKb($type, $refId));
             return;
         }
         if ($o['txid'] !== '') {
