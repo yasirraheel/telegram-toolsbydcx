@@ -1760,14 +1760,18 @@ class Bot {
         if (!$rows) { $edit($this->i->t('txns_empty'), $this->backHomeKb()); return; }
         $txt = "🔄 Transactions\n";
         $kbRows = [];
+        $statusEmoji = ['pending' => '⏳', 'confirmed' => '✅', 'cancelled' => '❌', 'failed' => '⚠️'];
         foreach ($rows as $d) {
-            $line = "#{$d['id']} — \${$d['amount_usd']} ({$d['points']} pts) — {$d['method']} — {$d['status']}";
+            $pts = (float)$d['points'];
+            $ptsStr = ($pts == (int)$pts) ? (string)(int)$pts : fmt_points($pts);
+            $st = (string)$d['status'];
+            $line = ($statusEmoji[$st] ?? '•') . " #{$d['id']}  \$" . fmt_usd($d['amount_usd']) . "  {$ptsStr} pts  " . ucfirst($st);
             if ($d['status'] === 'pending') {
                 // A pending deposit is tappable: it opens the deposit
                 // detail with Check Payment + Cancel, so it never sits
                 // stuck with no way to pay or cancel it.
                 $txt .= "\n" . $line;
-                $kbRows[] = [btn("💎 Deposit #{$d['id']} — \${$d['amount_usd']} — Pay / Cancel", 'd:' . (int)$d['id'], 'primary')];
+                $kbRows[] = [btn("💎 Deposit #{$d['id']}  \$" . fmt_usd($d['amount_usd']) . "  Pay / Cancel", 'd:' . (int)$d['id'], 'primary')];
             } else {
                 $txt .= "\n" . $line;
             }
