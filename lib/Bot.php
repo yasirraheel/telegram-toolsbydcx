@@ -953,11 +953,14 @@ class Bot {
         $st = $pdo->prepare("SELECT p.*, (SELECT COUNT(*) FROM stock_items s WHERE s.product_id=p.id AND s.status='available') stock
             FROM products p WHERE p.bot_id=? AND p.category_id=? AND p.active=1 ORDER BY p.sort ASC LIMIT 10 OFFSET $off");
         $st->execute([$this->bot['id'], $catId]);
-        $cat = $pdo->prepare("SELECT name, emoji, image_url FROM categories WHERE id=?");
+        $cat = $pdo->prepare("SELECT * FROM categories WHERE id=?");
         $cat->execute([$catId]);
         $catRow = $cat->fetch();
         $catName = $catRow['name'] ?? 'Category';
         $catEmoji = $catRow['emoji'] ?? '📁';
+        // image_url may not exist yet if the live DB migration
+        // (db/add_image_url.sql) has not been run — default to '' so the
+        // category still opens instead of the query failing.
         $catImg = trim((string)($catRow['image_url'] ?? ''));
         $txt = "📂 📦 " . $catEmoji . " " . esc($catName) . "\n——————————\nPage {$page}/{$pages} 🎉\n";
         $rows = [];
