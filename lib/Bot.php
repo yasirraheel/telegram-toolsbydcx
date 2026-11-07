@@ -875,7 +875,8 @@ class Bot {
                     : '📋 Please paste your transaction ID (TXID) for #' . $refId . ':');
                 return;
             case 'pc': $this->checkPayment($edit, $parts[1] ?? 'o', (int)($parts[2] ?? 0)); return;
-            case 'px': $this->cancelOrder($edit, $parts[1] ?? 'o', (int)($parts[2] ?? 0)); return;
+            case 'px': $this->confirmCancel($edit, $parts[1] ?? 'o', (int)($parts[2] ?? 0)); return;
+            case 'pxc': $this->cancelOrder($edit, $parts[1] ?? 'o', (int)($parts[2] ?? 0)); return;
             case 'ord': $this->showOrdersCb($edit, $parts[1], (int)($parts[2] ?? 1)); return;
             case 'o': $this->showOrderDetail($edit, (int)$parts[1]); return;
             case 'tic':
@@ -1568,6 +1569,20 @@ class Bot {
         $p = $this->product((int)$row['product_id']);
         if (!$p) return false;
         return $this->fulfillExistingOrder((int)$row['id'], $p, (int)$row['qty'], (string)($data['transactionId'] ?? ''));
+    }
+
+    // Cancelling is destructive (the order leaves Pending for good), so
+    // ask first. Tapping "Cancel Payment" by mistake used to silently move
+    // the order to Cancelled, which looked like the pending order had
+    // vanished from the Pending filter.
+    private function confirmCancel(callable $edit, string $type, int $oid): void {
+        $label = $type === 'd' ? "deposit #{$oid}" : "order #{$oid}";
+        $back = $type === 'd' ? 'm:home' : 'o:' . $oid;
+        $kb = inline_kb([
+            [btn('✅ Yes, cancel it', 'pxc:' . $type . ':' . $oid, 'danger')],
+            [btn('⬅️ No, keep it', $back, 'primary')],
+        ]);
+        $edit("⚠️ Cancel {$label}?\n\nThe payment will be cancelled and you will need to start again if you still want it.", $kb);
     }
 
     private function cancelOrder(callable $edit, string $type, int $oid): void {
