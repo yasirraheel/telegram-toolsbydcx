@@ -32,6 +32,7 @@ function admin_nav(): array {
             'apikeys'    => '🔑 API Keys',
             'broadcasts' => '📣 Broadcasts',
             'settings'   => '⚙️ Settings',
+            'maintenance' => '🛠️ Maintenance',
         ],
     ];
 }
