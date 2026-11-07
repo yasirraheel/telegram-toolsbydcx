@@ -716,26 +716,57 @@ class Bot {
         $this->showTracked($this->i->t('howto_title'), inline_kb($rows));
     }
 
-    private function showOrders(string $filter, int $page): void {
+    // Orders screen: TRUE overall stats (never filtered) plus the filtered
+    // order list as clickable buttons. The stats are computed over ALL of
+    // the user's orders, so the header never lies when a filter is on.
+    // Spent counts only delivered orders — a pending or cancelled order is
+    // not money spent.
+    private function ordersScreen(string $filter, int $page): array {
+        $pdo = db();
+        $stats = $pdo->prepare("SELECT COUNT(*) total, COALESCE(SUM(CASE WHEN status='delivered' THEN total_usd ELSE 0 END),0) spent, COALESCE(SUM(status='delivered'),0) delivered, COALESCE(SUM(status='pending'),0) pending, COALESCE(SUM(status='refunded'),0) refunded, COALESCE(SUM(status='cancelled'),0) cancelled FROM orders WHERE bot_id=? AND user_id=?");
+        $stats->execute([$this->bot['id'], $this->user['id']]);
+        $s = $stats->fetch();
+        $filterLabel = $filter === 'all' ? 'All' : ucfirst($filter);
+        $txt = "🧾 My Orders — {$filterLabel}\n\n"
+            . "Total: " . (int)$s['total'] . " orders · $" . fmt_usd($s['spent']) . " spent\n"
+            . "✅ Delivered: " . (int)$s['delivered'] . " · ⏳ Pending: " . (int)$s['pending'] . "\n"
+            . "↩️ Refunded: " . (int)$s['refunded'] . " · ❌ Cancelled: " . (int)$s['cancelled'];
         $where = "o.bot_id=? AND o.user_id=?";
         $params = [$this->bot['id'], $this->user['id']];
         if ($filter !== 'all') { $where .= " AND o.status=?"; $params[] = $filter; }
-        $pdo = db();
-        $c = $pdo->prepare("SELECT COUNT(*) c, COALESCE(SUM(total_usd),0) s FROM orders o WHERE $where");
-        $c->execute($params);
-        $r = $c->fetch();
-        $txt = $this->i->t('orders_title', ['count' => (int)$r['c'], 'spent' => fmt_usd($r['s'])]);
-        $off = ($page - 1) * 10;
-        $st = $pdo->prepare("SELECT o.*, p.name pname FROM orders o JOIN products p ON p.id=o.product_id WHERE $where ORDER BY o.created_at DESC LIMIT 10 OFFSET $off");
+        $perPage = 8;
+        $off = ($page - 1) * $perPage;
+        $cnt = $pdo->prepare("SELECT COUNT(*) FROM orders o WHERE $where");
+        $cnt->execute($params);
+        $totalRows = (int)$cnt->fetchColumn();
+        $pages = max(1, (int)ceil($totalRows / $perPage));
+        if ($page > $pages) $page = $pages;
+        $off = ($page - 1) * $perPage;
+        $st = $pdo->prepare("SELECT o.*, p.name pname FROM orders o JOIN products p ON p.id=o.product_id WHERE $where ORDER BY o.created_at DESC LIMIT $perPage OFFSET $off");
         $st->execute($params);
-        foreach ($st->fetchAll() as $o) {
-            $txt .= "\n\n#{$o['id']} — " . esc($o['pname']) . " ×{$o['qty']} — \${$o['total_usd']} — {$o['status']}";
+        $rows = $st->fetchAll();
+        $kbRows = [];
+        if (!$rows) {
+            $txt .= "\n\nNo orders in this filter yet.";
+        } else {
+            $txt .= "\n\nTap an order to see its details and actions:";
+            foreach ($rows as $o) {
+                $label = '#' . $o['id'] . ' · ' . mb_substr((string)$o['pname'], 0, 24) . ' · $' . fmt_usd($o['total_usd']);
+                $kbRows[] = [btn($label, 'o:' . (int)$o['id'], 'primary')];
+            }
         }
-        $kb = inline_kb([
-            [btn('✅ Delivered', 'ord:delivered:1', 'primary'), btn('⏳ Pending', 'ord:pending:1', 'success')],
-            [btn('↩️ Refunded', 'ord:refunded:1', 'primary'), btn('❌ Cancelled', 'ord:cancelled:1', 'success')],
-            [btn('📋 All', 'ord:all:1', 'primary'), btn($this->i->t('btn_back'), 'm:home', 'primary')],
-        ]);
+        $kbRows[] = [btn('✅ Delivered', 'ord:delivered:1', 'primary'), btn('⏳ Pending', 'ord:pending:1', 'success')];
+        $kbRows[] = [btn('↩️ Refunded', 'ord:refunded:1', 'primary'), btn('❌ Cancelled', 'ord:cancelled:1', 'success')];
+        $nav = [];
+        if ($page > 1) $nav[] = btn('⬅️ Prev', 'ord:' . $filter . ':' . ($page - 1), 'primary');
+        if ($page < $pages) $nav[] = btn('Next ➡️', 'ord:' . $filter . ':' . ($page + 1), 'primary');
+        if ($nav) $kbRows[] = $nav;
+        $kbRows[] = [btn('📋 All', 'ord:all:1', 'primary'), btn($this->i->t('btn_back'), 'm:home', 'primary')];
+        return [$txt, inline_kb($kbRows)];
+    }
+
+    private function showOrders(string $filter, int $page): void {
+        [$txt, $kb] = $this->ordersScreen($filter, $page);
         $this->showTracked($txt, $kb);
     }
 
@@ -1614,25 +1645,7 @@ class Bot {
     }
 
     private function showOrdersCb(callable $edit, string $filter, int $page): void {
-        $where = "o.bot_id=? AND o.user_id=?";
-        $params = [$this->bot['id'], $this->user['id']];
-        if ($filter !== 'all') { $where .= " AND o.status=?"; $params[] = $filter; }
-        $pdo = db();
-        $c = $pdo->prepare("SELECT COUNT(*) c, COALESCE(SUM(total_usd),0) s FROM orders o WHERE $where");
-        $c->execute($params);
-        $r = $c->fetch();
-        $txt = $this->i->t('orders_title', ['count' => (int)$r['c'], 'spent' => fmt_usd($r['s'])]);
-        $off = ($page - 1) * 10;
-        $st = $pdo->prepare("SELECT o.*, p.name pname FROM orders o JOIN products p ON p.id=o.product_id WHERE $where ORDER BY o.created_at DESC LIMIT 10 OFFSET $off");
-        $st->execute($params);
-        foreach ($st->fetchAll() as $o) {
-            $txt .= "\n\n#{$o['id']} — " . esc($o['pname']) . " ×{$o['qty']} — \${$o['total_usd']} — {$o['status']}";
-        }
-        $kb = inline_kb([
-            [btn('✅ Delivered', 'ord:delivered:1', 'primary'), btn('⏳ Pending', 'ord:pending:1', 'success')],
-            [btn('↩️ Refunded', 'ord:refunded:1', 'primary'), btn('❌ Cancelled', 'ord:cancelled:1', 'success')],
-            [btn('📋 All', 'ord:all:1', 'primary'), btn($this->i->t('btn_back'), 'm:home', 'primary')],
-        ]);
+        [$txt, $kb] = $this->ordersScreen($filter, $page);
         $edit($txt, $kb);
     }
 
@@ -1641,12 +1654,34 @@ class Bot {
         $st->execute([$oid, $this->bot['id'], $this->user['id']]);
         $o = $st->fetch();
         if (!$o) { $edit('❌ Order not found.', $this->backHomeKb()); return; }
-        $txt = "🧾 Order #{$o['id']}\n\nProduct: " . esc($o['pname']) . "\nQty: {$o['qty']}\nTotal: \${$o['total_usd']}\nStatus: {$o['status']}\nPayment: {$o['payment_method']}\nDate: {$o['created_at']}";
-        $kb = inline_kb([
-            [btn('🛡️ Warranty Claim', 'warc:warranty:' . $o['id'], 'primary'), btn('↩️ Refund Request', 'warc:refund:' . $o['id'], 'danger')],
-            [btn($this->i->t('btn_back'), 'ord:all:1', 'primary')],
-        ]);
-        $edit($txt, $kb);
+        $status = (string)$o['status'];
+        $method = (string)($o['payment_method'] ?? $o['method'] ?? '');
+        $txt = "🧾 Order #{$o['id']}\n\nProduct: " . esc($o['pname']) . "\nQty: {$o['qty']}\nTotal: \${$o['total_usd']}\nStatus: {$status}\nPayment: {$method}\nDate: {$o['created_at']}";
+        if (!empty($o['txid'])) $txt .= "\nTXID: <code>" . esc($o['txid']) . "</code>";
+        $kbRows = [];
+        if ($status === 'pending') {
+            // Payment actions follow the order's own payment method, so the
+            // user can finish or check exactly the payment they started.
+            if ($method === 'binance') {
+                $details = $this->paymentDetails('binance');
+                $uid = trim((string)($details['uid'] ?? ''));
+                $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
+                if ($uid !== '') $txt .= "\n\nSend \$" . fmt_usd($o['total_usd']) . " {$currency} to Binance Pay UID:\n<code>{$uid}</code>";
+                $kbRows[] = [btn('🔍 Check Payment', 'pc:o:' . $o['id'], 'primary'), btn('❌ Cancel Payment', 'px:o:' . $o['id'], 'danger')];
+            } elseif (in_array($method, ['bep20', 'sol', 'ton'], true)) {
+                $details = $this->paymentDetails($method);
+                $addr = trim((string)($details['address'] ?? ''));
+                if ($addr !== '') $txt .= "\n\nSend \$" . fmt_usd($o['total_usd']) . " USDT (" . strtoupper($method) . ") to:\n<code>{$addr}</code>";
+                $kbRows[] = [btn('🔍 Check Payment', 'pc:o:' . $o['id'], 'primary'), btn('❌ Cancel Payment', 'px:o:' . $o['id'], 'danger')];
+            } else {
+                $txt .= "\n\nYour payment is being processed. You will be notified once it is confirmed.";
+            }
+        } elseif ($status === 'delivered') {
+            $txt .= "\n\nYour product was delivered in this chat. If it stopped working, open a warranty claim or ask for a refund below.";
+            $kbRows[] = [btn('🛡️ Warranty Claim', 'warc:warranty:' . $o['id'], 'primary'), btn('↩️ Refund Request', 'warc:refund:' . $o['id'], 'danger')];
+        }
+        $kbRows[] = [btn($this->i->t('btn_back'), 'ord:all:1', 'primary')];
+        $edit($txt, inline_kb($kbRows));
     }
 
     private function showTxns(callable $edit): void {
