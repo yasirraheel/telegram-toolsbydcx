@@ -66,6 +66,16 @@ function tg_answer(string $token, string $cbId, ?string $text = null): array {
     if ($text) $p['text'] = $text;
     return tg_api($token, 'answerCallbackQuery', $p);
 }
+function tg_edit_media(string $token, int $chatId, int $msgId, string $photo, string $caption, $markup = null): array {
+    // Swap a message's media in place (photo by URL). Used when moving
+    // between two photo screens so there is no delete animation — the
+    // photo just changes where it is. Captions are limited to 1024 chars.
+    if (mb_strlen($caption) > 1024) return ['ok' => false, 'description' => 'caption too long'];
+    $media = ['type' => 'photo', 'media' => $photo, 'caption' => $caption, 'parse_mode' => 'HTML'];
+    $p = ['chat_id' => $chatId, 'message_id' => $msgId, 'media' => json_encode($media)];
+    if ($markup) $p['reply_markup'] = json_encode($markup);
+    return tg_api($token, 'editMessageMedia', $p);
+}
 function tg_photo(string $token, int $chatId, string $photo, string $caption, $markup = null): array {
     $p = ['chat_id' => $chatId, 'photo' => $photo, 'caption' => $caption, 'parse_mode' => 'HTML'];
     if ($markup) $p['reply_markup'] = json_encode($markup);

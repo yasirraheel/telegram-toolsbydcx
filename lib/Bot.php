@@ -67,7 +67,7 @@ class Bot {
         // Preserve the tracked menu message across state changes: the
         // state machine must never wipe the screen tracking.
         $cur = $this->stateData();
-        foreach (['menu_msg_id', 'menu_media', 'menu_is_banner', 'kb_sent', 'kb_msg_id', 'kb_sent_at', 'copy_msg_id'] as $k) {
+        foreach (['menu_msg_id', 'menu_media', 'menu_is_banner', 'menu_image', 'kb_sent', 'kb_msg_id', 'kb_sent_at', 'copy_msg_id'] as $k) {
             if (!array_key_exists($k, $data) && array_key_exists($k, $cur)) $data[$k] = $cur[$k];
         }
         db()->prepare("UPDATE users SET state=?, state_data=? WHERE id=?")
@@ -85,13 +85,14 @@ class Bot {
     // stacking fresh messages below. No schema change needed.
     private function menuMsg(): array {
         $d = $this->stateData();
-        return ['id' => (int)($d['menu_msg_id'] ?? 0), 'media' => !empty($d['menu_media']), 'banner' => !empty($d['menu_is_banner'])];
+        return ['id' => (int)($d['menu_msg_id'] ?? 0), 'media' => !empty($d['menu_media']), 'banner' => !empty($d['menu_is_banner']), 'image' => (string)($d['menu_image'] ?? '')];
     }
-    private function menuTrack(int $id, bool $media, ?bool $isBanner = null): void {
+    private function menuTrack(int $id, bool $media, ?bool $isBanner = null, ?string $imageUrl = null): void {
         $d = $this->stateData();
         $d['menu_msg_id'] = $id;
         $d['menu_media'] = $media ? 1 : 0;
         if ($isBanner !== null) $d['menu_is_banner'] = $isBanner ? 1 : 0;
+        if ($imageUrl !== null) $d['menu_image'] = $imageUrl;
         db()->prepare("UPDATE users SET state_data=? WHERE id=?")
             ->execute([json_encode($d), $this->user['id']]);
         $this->user['state_data'] = json_encode($d);
@@ -166,22 +167,40 @@ class Bot {
     // to it). The new message is tracked as media, not the banner, so
     // sendWelcome knows to restore the banner GIF when going Home.
     // Returns true when a photo message was sent.
-    private function showPhotoScreen(string $imageUrl, string $caption, $kb): bool {
+    private function showPhotoScreen(string $imageUrl, string $caption, $kb, ?callable $edit = null): bool {
         $this->deleteCopyMsg();
         $m = $this->menuMsg();
+        // Same photo already on screen (e.g. Next/Prev inside one
+        // category): only the caption and buttons change, so edit them in
+        // place. No delete, no animation, no re-upload — smooth paging.
+        if ($m['id'] > 0 && $m['media'] && !$m['banner'] && ($m['image'] ?? '') === $imageUrl && $edit) {
+            $edit($caption, $kb);
+            return true;
+        }
+        // A media message is on screen (banner GIF or another photo): swap
+        // the photo in place instead of deleting and resending it.
+        if ($m['id'] > 0 && $m['media']) {
+            $res = tg_edit_media($this->token, $this->chatId, $m['id'], $imageUrl, $caption, $kb);
+            if ($res['ok'] ?? false) {
+                $this->menuTrack($m['id'], true, false, $imageUrl);
+                return true;
+            }
+        }
+        // Text screen below (or nothing tracked): delete it and send the
+        // photo fresh at the bottom so it auto-scrolls into view.
         if ($m['id'] > 0) {
             tg_api($this->token, 'deleteMessage', ['chat_id' => $this->chatId, 'message_id' => $m['id']]);
         }
         $res = tg_photo($this->token, $this->chatId, $imageUrl, $caption, $kb);
         if ($res['ok'] ?? false) {
-            $this->menuTrack((int)$res['result']['message_id'], true, false);
+            $this->menuTrack((int)$res['result']['message_id'], true, false, $imageUrl);
             return true;
         }
         // The image URL failed (bad link / Telegram could not fetch it):
         // fall back to a plain text screen so the user still sees the
         // product instead of an error.
         $r2 = tg_send($this->token, $this->chatId, $caption, $kb);
-        if ($r2['ok'] ?? false) $this->menuTrack((int)$r2['result']['message_id'], false, false);
+        if ($r2['ok'] ?? false) $this->menuTrack((int)$r2['result']['message_id'], false, false, '');
         return false;
     }
 
@@ -1042,7 +1061,7 @@ class Bot {
         $rows[] = [btn($this->i->t('btn_back'), 'm:shop', 'primary')];
         // A category with its own image shows that image, not the welcome
         // banner GIF (the banner is only the fallback when no image is set).
-        if ($catImg !== '') { $this->showPhotoScreen($catImg, $txt, inline_kb($rows)); return; }
+        if ($catImg !== '') { $this->showPhotoScreen($catImg, $txt, inline_kb($rows), $edit); return; }
         // Long list: from the banner edit in place (no delete animation);
         // from a text/photo screen send fresh at the bottom (auto-scroll).
         $this->showListScreen($txt, inline_kb($rows), $edit);
@@ -1079,7 +1098,7 @@ class Bot {
         // has an image does the banner stay (the edit-in-place fallback).
         $img = trim((string)($p['image_url'] ?? ''));
         if ($img === '') $img = trim((string)($p['cat_image_url'] ?? ''));
-        if ($img !== '') { $this->showPhotoScreen($img, $txt, $kb); return; }
+        if ($img !== '') { $this->showPhotoScreen($img, $txt, $kb, $edit); return; }
         $edit($txt, $kb);
     }
 
