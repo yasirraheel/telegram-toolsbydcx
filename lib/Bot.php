@@ -67,7 +67,7 @@ class Bot {
         // Preserve the tracked menu message across state changes: the
         // state machine must never wipe the screen tracking.
         $cur = $this->stateData();
-        foreach (['menu_msg_id', 'menu_media', 'kb_sent', 'kb_msg_id', 'kb_sent_at'] as $k) {
+        foreach (['menu_msg_id', 'menu_media', 'kb_sent', 'kb_msg_id', 'kb_sent_at', 'copy_msg_id'] as $k) {
             if (!array_key_exists($k, $data) && array_key_exists($k, $cur)) $data[$k] = $cur[$k];
         }
         db()->prepare("UPDATE users SET state=?, state_data=? WHERE id=?")
@@ -95,6 +95,28 @@ class Bot {
             ->execute([json_encode($d), $this->user['id']]);
         $this->user['state_data'] = json_encode($d);
     }
+    // The copy message (e.g. "Payment address — tap to copy") is an extra
+    // message, not the tracked menu screen, so navigation would leave it
+    // sitting in the chat. Track it and delete it on any navigation, the
+    // same way the tracked menu message is cleaned up.
+    private function trackCopyMsg(int $id): void {
+        $d = $this->stateData();
+        $d['copy_msg_id'] = $id;
+        db()->prepare("UPDATE users SET state_data=? WHERE id=?")
+            ->execute([json_encode($d), $this->user['id']]);
+        $this->user['state_data'] = json_encode($d);
+    }
+    private function deleteCopyMsg(): void {
+        $d = $this->stateData();
+        $id = (int)($d['copy_msg_id'] ?? 0);
+        if ($id > 0) {
+            tg_api($this->token, 'deleteMessage', ['chat_id' => $this->chatId, 'message_id' => $id]);
+            $d['copy_msg_id'] = 0;
+            db()->prepare("UPDATE users SET state_data=? WHERE id=?")
+                ->execute([json_encode($d), $this->user['id']]);
+            $this->user['state_data'] = json_encode($d);
+        }
+    }
     // Show a text screen as a FRESH message at the bottom of the chat.
     // This is used for screens triggered by a text message (a hamburger
     // command or a reply-keyboard tap): the user is looking at the bottom
@@ -107,6 +129,7 @@ class Bot {
     // button taps use the $edit closure instead (they edit in place,
     // because the user is looking at the banner when they tap it).
     private function showTracked(string $text, $kb): void {
+        $this->deleteCopyMsg();
         $m = $this->menuMsg();
         if ($m['id'] > 0) {
             tg_api($this->token, 'deleteMessage', ['chat_id' => $this->chatId, 'message_id' => $m['id']]);
@@ -230,6 +253,7 @@ class Bot {
     }
 
     private function sendWelcome(bool $fresh = false): void {
+        $this->deleteCopyMsg();
         // Edit the tracked menu message in place when it is the banner, so
         // repeated Menu / /start taps never stack fresh banners below.
         // Only send a fresh banner when there is no tracked message or it
@@ -663,6 +687,10 @@ class Bot {
         $msgId = (int)$cb['message']['message_id'];
         $parts = explode(':', $data);
         $cmd = $parts[0];
+
+        // Any navigation (Cancel, another item, Home) removes the extra
+        // copy message, the same way the tracked menu is cleaned up.
+        $this->deleteCopyMsg();
 
         // Favorites has no list behind it yet: acknowledge with a toast
         // instead of a fake confirmation message (and never double-answer
@@ -1224,7 +1252,8 @@ class Bot {
         $details = json_decode($pm->fetch()['details'] ?? '{}', true) ?: [];
         $addr = $details['address'] ?? $details['uid'] ?? '';
         if ($addr === '') { $edit('❌ No wallet address is set for this method yet.', $this->backHomeKb()); return; }
-        tg_send($this->token, $this->chatId, "📋 Payment address — tap to copy:\n\n<code>" . esc($addr) . "</code>");
+        $res = tg_send($this->token, $this->chatId, "📋 Payment address — tap to copy:\n\n<code>" . esc($addr) . "</code>");
+        if ($res['ok'] ?? false) $this->trackCopyMsg((int)$res['result']['message_id']);
     }
 
     private function checkPayment(callable $edit, string $type, int $refId): void {
