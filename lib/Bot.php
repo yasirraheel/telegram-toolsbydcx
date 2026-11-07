@@ -807,7 +807,7 @@ class Bot {
             $pages = max(1, (int)ceil($totalRows / $perPage));
             if ($page > $pages) $page = $pages;
             $off = ($page - 1) * $perPage;
-            $st = $pdo->prepare("SELECT o.*, p.name pname FROM orders o JOIN products p ON p.id=o.product_id WHERE $where ORDER BY o.created_at DESC LIMIT $perPage OFFSET $off");
+            $st = $pdo->prepare("SELECT o.*, COALESCE(p.name, 'Product') pname FROM orders o LEFT JOIN products p ON p.id=o.product_id WHERE $where ORDER BY o.created_at DESC LIMIT $perPage OFFSET $off");
             $st->execute($params);
             $rows = $st->fetchAll();
             if (!$rows) {
@@ -1721,6 +1721,8 @@ class Bot {
         if ($status === 'pending') {
             // Payment actions follow the order's own payment method, so the
             // user can finish or check exactly the payment they started.
+            // Every pending order can be cancelled — nobody is ever stuck
+            // on a pending order with no way out.
             if ($method === 'binance') {
                 $details = $this->paymentDetails('binance');
                 $uid = trim((string)($details['uid'] ?? ''));
@@ -1732,8 +1734,15 @@ class Bot {
                 $addr = trim((string)($details['address'] ?? ''));
                 if ($addr !== '') $txt .= "\n\nSend \$" . fmt_usd($o['total_usd']) . " USDT (" . strtoupper($method) . ") to:\n<code>{$addr}</code>";
                 $kbRows[] = [btn('🔍 Check Payment', 'pc:o:' . $o['id'], 'primary'), btn('❌ Cancel Payment', 'px:o:' . $o['id'], 'danger')];
+            } elseif ($method === 'stars') {
+                $txt .= "\n\nComplete the Telegram Stars invoice in this chat to pay, or cancel below.";
+                $kbRows[] = [btn('❌ Cancel Payment', 'px:o:' . $o['id'], 'danger')];
             } else {
                 $txt .= "\n\nYour payment is being processed. You will be notified once it is confirmed.";
+                $kbRows[] = [btn('❌ Cancel Payment', 'px:o:' . $o['id'], 'danger')];
+            }
+            if (!empty($o['txid'])) {
+                $txt .= "\n\n⏳ Your payment reference was received. Waiting for admin approval.";
             }
         } elseif ($status === 'delivered') {
             $txt .= "\n\nYour product was delivered in this chat. If it stopped working, open a warranty claim or ask for a refund below.";
