@@ -9,6 +9,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cat = post_int('category_id');
         $price = post_float('price_usd');
         $desc = post_str('description');
+        $img = post_str('image_url');
         $format = post_str('delivery_format') ?: 'Coupon / Redemption Code';
         $status = post_str('status') === 'out_of_stock' ? 'out_of_stock' : 'active';
         $sort = post_int('sort');
@@ -17,12 +18,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $chk->execute([$cat, $botId]);
         if ($name === '' || !$chk->fetch()) { flash('Name and a valid category are required.', 'err'); }
         elseif ($id > 0) {
-            $pdo->prepare("UPDATE products SET category_id=?, name=?, price_usd=?, description=?, delivery_format=?, status=?, sort=?, active=? WHERE id=? AND bot_id=?")
-                ->execute([$cat, $name, $price, $desc, $format, $status, $sort, $active, $id, $botId]);
+            $pdo->prepare("UPDATE products SET category_id=?, name=?, price_usd=?, description=?, image_url=?, delivery_format=?, status=?, sort=?, active=? WHERE id=? AND bot_id=?")
+                ->execute([$cat, $name, $price, $desc, $img, $format, $status, $sort, $active, $id, $botId]);
             flash('Product updated.');
         } else {
-            $pdo->prepare("INSERT INTO products (bot_id, category_id, name, price_usd, description, delivery_format, status, sort, active) VALUES (?,?,?,?,?,?,?,?,?)")
-                ->execute([$botId, $cat, $name, $price, $desc, $format, $status, $sort, $active]);
+            $pdo->prepare("INSERT INTO products (bot_id, category_id, name, price_usd, description, image_url, delivery_format, status, sort, active) VALUES (?,?,?,?,?,?,?,?,?,?)")
+                ->execute([$botId, $cat, $name, $price, $desc, $img, $format, $status, $sort, $active]);
             flash('Product added.');
         }
     } elseif ($action === 'delete') {
@@ -68,6 +69,7 @@ admin_head('Products', 'products', $botId, $bots);
 <div style="width:110px"><label>Sort</label><input type="number" name="sort" value="<?= (int)($edit['sort'] ?? 0) ?>"></div>
 </div>
 <label>Description</label><textarea name="description"><?= esc($edit['description'] ?? '') ?></textarea>
+<label>Image URL (shown as the product photo in the bot; leave empty to keep the welcome banner)</label><input type="url" name="image_url" value="<?= esc($edit['image_url'] ?? '') ?>" placeholder="https://...">
 <div class="row">
 <div style="flex:1"><label>Delivery format</label><input type="text" name="delivery_format" value="<?= esc($edit['delivery_format'] ?? 'Coupon / Redemption Code') ?>"></div>
 <div><label>Status</label><select name="status"><option value="active" <?= ($edit['status'] ?? 'active') === 'active' ? 'selected' : '' ?>>active</option><option value="out_of_stock" <?= ($edit['status'] ?? '') === 'out_of_stock' ? 'selected' : '' ?>>out_of_stock</option></select></div>

@@ -8,17 +8,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $name = post_str('name');
         $slug = slugify(post_str('slug') ?: $name);
         $emoji = post_str('emoji') ?: '📁';
+        $img = post_str('image_url');
         $sort = post_int('sort');
         $active = post_int('active', 1) ? 1 : 0;
         if ($name === '') { flash('Name is required.', 'err'); }
         elseif ($id > 0) {
-            $st = $pdo->prepare("UPDATE categories SET name=?, slug=?, emoji=?, sort=?, active=? WHERE id=? AND bot_id=?");
-            $st->execute([$name, $slug, $emoji, $sort, $active, $id, $botId]);
+            $st = $pdo->prepare("UPDATE categories SET name=?, slug=?, emoji=?, image_url=?, sort=?, active=? WHERE id=? AND bot_id=?");
+            $st->execute([$name, $slug, $emoji, $img, $sort, $active, $id, $botId]);
             flash('Category updated.');
         } else {
             try {
-                $pdo->prepare("INSERT INTO categories (bot_id, name, slug, emoji, sort, active) VALUES (?,?,?,?,?,?)")
-                    ->execute([$botId, $name, $slug, $emoji, $sort, $active]);
+                $pdo->prepare("INSERT INTO categories (bot_id, name, slug, emoji, image_url, sort, active) VALUES (?,?,?,?,?,?,?)")
+                    ->execute([$botId, $name, $slug, $emoji, $img, $sort, $active]);
                 flash('Category added.');
             } catch (PDOException $e) { flash('Could not add category (slug already exists?): ' . $e->getMessage(), 'err'); }
         }
@@ -51,7 +52,9 @@ admin_head('Categories', 'categories', $botId, $bots);
 <div style="width:90px"><label>Emoji</label><input type="text" name="emoji" value="<?= esc($edit['emoji'] ?? '📁') ?>"></div>
 <div style="width:90px"><label>Sort</label><input type="number" name="sort" value="<?= (int)($edit['sort'] ?? 0) ?>"></div>
 <div><label>Active</label><select name="active"><option value="1" <?= ($edit['active'] ?? 1) ? 'selected' : '' ?>>Yes</option><option value="0" <?= isset($edit) && !$edit['active'] ? 'selected' : '' ?>>No</option></select></div>
-</div><button type="submit" style="margin-top:12px"><?= $edit ? 'Save changes' : 'Add category' ?></button>
+</div>
+<label>Image URL (shown as the category photo in the bot; leave empty to keep the welcome banner)</label><input type="url" name="image_url" value="<?= esc($edit['image_url'] ?? '') ?>" placeholder="https://...">
+<button type="submit" style="margin-top:12px"><?= $edit ? 'Save changes' : 'Add category' ?></button>
 <?php if ($edit): ?><a class="btn btn2" href="index.php?page=categories">Cancel</a><?php endif; ?></form></div>
 
 <div class="card"><table><tr><th></th><th>Name</th><th>Slug</th><th>Sort</th><th>Products</th><th>Active</th><th></th></tr>

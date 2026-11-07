@@ -67,7 +67,7 @@ class Bot {
         // Preserve the tracked menu message across state changes: the
         // state machine must never wipe the screen tracking.
         $cur = $this->stateData();
-        foreach (['menu_msg_id', 'menu_media', 'kb_sent', 'kb_msg_id', 'kb_sent_at', 'copy_msg_id'] as $k) {
+        foreach (['menu_msg_id', 'menu_media', 'menu_is_banner', 'kb_sent', 'kb_msg_id', 'kb_sent_at', 'copy_msg_id'] as $k) {
             if (!array_key_exists($k, $data) && array_key_exists($k, $cur)) $data[$k] = $cur[$k];
         }
         db()->prepare("UPDATE users SET state=?, state_data=? WHERE id=?")
@@ -85,12 +85,13 @@ class Bot {
     // stacking fresh messages below. No schema change needed.
     private function menuMsg(): array {
         $d = $this->stateData();
-        return ['id' => (int)($d['menu_msg_id'] ?? 0), 'media' => !empty($d['menu_media'])];
+        return ['id' => (int)($d['menu_msg_id'] ?? 0), 'media' => !empty($d['menu_media']), 'banner' => !empty($d['menu_is_banner'])];
     }
-    private function menuTrack(int $id, bool $media): void {
+    private function menuTrack(int $id, bool $media, ?bool $isBanner = null): void {
         $d = $this->stateData();
         $d['menu_msg_id'] = $id;
         $d['menu_media'] = $media ? 1 : 0;
+        if ($isBanner !== null) $d['menu_is_banner'] = $isBanner ? 1 : 0;
         db()->prepare("UPDATE users SET state_data=? WHERE id=?")
             ->execute([json_encode($d), $this->user['id']]);
         $this->user['state_data'] = json_encode($d);
@@ -136,6 +137,33 @@ class Bot {
         }
         $res = tg_send($this->token, $this->chatId, $text, $kb);
         if ($res['ok'] ?? false) $this->menuTrack((int)$res['result']['message_id'], false);
+    }
+
+    // Show a screen with its own image (product / category photo). The
+    // tracked message is the welcome banner (an animation), and editing
+    // its caption keeps the banner GIF — so a product photo can only be
+    // shown by replacing the message: delete the tracked one and send a
+    // fresh photo message at the bottom (which also auto-scrolls the chat
+    // to it). The new message is tracked as media, not the banner, so
+    // sendWelcome knows to restore the banner GIF when going Home.
+    // Returns true when a photo message was sent.
+    private function showPhotoScreen(string $imageUrl, string $caption, $kb): bool {
+        $this->deleteCopyMsg();
+        $m = $this->menuMsg();
+        if ($m['id'] > 0) {
+            tg_api($this->token, 'deleteMessage', ['chat_id' => $this->chatId, 'message_id' => $m['id']]);
+        }
+        $res = tg_photo($this->token, $this->chatId, $imageUrl, $caption, $kb);
+        if ($res['ok'] ?? false) {
+            $this->menuTrack((int)$res['result']['message_id'], true, false);
+            return true;
+        }
+        // The image URL failed (bad link / Telegram could not fetch it):
+        // fall back to a plain text screen so the user still sees the
+        // product instead of an error.
+        $r2 = tg_send($this->token, $this->chatId, $caption, $kb);
+        if ($r2['ok'] ?? false) $this->menuTrack((int)$r2['result']['message_id'], false, false);
+        return false;
     }
 
     // ---------- keyboards ----------
@@ -271,7 +299,11 @@ class Bot {
         // short caption in code so pulling alone fixes the preview; the
         // Account screen still shows the user ID / points / balance.
         $caption = '👋 Welcome to ToolsByDcx';
-        if (!$fresh && $m['id'] > 0 && $m['media']) {
+        // Only edit in place when the tracked message IS the banner. A
+        // product/category photo is also a media message, but editing its
+        // caption would keep the product photo with a welcome caption —
+        // so a photo screen is deleted and a fresh banner is sent instead.
+        if (!$fresh && $m['id'] > 0 && $m['media'] && $m['banner']) {
             $res = tg_edit_caption($this->token, $this->chatId, $m['id'], $caption, $this->mainMenuKb());
             if ($res['ok'] ?? false) {
                 $this->menuTrack((int)($res['result']['message_id'] ?? $m['id']), !empty($res['_fallback_text']) ? false : true);
@@ -300,7 +332,7 @@ class Bot {
         } else {
             $res = tg_animation($this->token, $this->chatId, $base . '/assets/banner.gif', $caption, $this->mainMenuKb());
         }
-        if ($res['ok'] ?? false) $this->menuTrack((int)$res['result']['message_id'], true);
+        if ($res['ok'] ?? false) $this->menuTrack((int)$res['result']['message_id'], true, true);
         $this->showReplyKbHidden();
     }
 
@@ -903,7 +935,11 @@ class Bot {
         if ($row) $rows[] = $row;
         $rows[] = [btn($this->i->t('shop_classic'), 'pg:all:1', 'primary'), btn($this->i->t('btn_points'), 'm:points', 'success')];
         $rows[] = [btn($this->i->t('btn_back'), 'm:home', 'primary')];
-        $edit($this->i->t('shop_title'), inline_kb($rows));
+        // Long list (60+ categories): editing in place does not auto-scroll,
+        // so the bottom buttons sit below the fold and the user has to scroll
+        // down by hand. Send it fresh at the bottom instead, so the client
+        // scrolls to it and the whole list is visible.
+        $this->showTracked($this->i->t('shop_title'), inline_kb($rows));
     }
 
     private function showCategory(callable $edit, int $catId, int $page): void {
@@ -917,11 +953,12 @@ class Bot {
         $st = $pdo->prepare("SELECT p.*, (SELECT COUNT(*) FROM stock_items s WHERE s.product_id=p.id AND s.status='available') stock
             FROM products p WHERE p.bot_id=? AND p.category_id=? AND p.active=1 ORDER BY p.sort ASC LIMIT 10 OFFSET $off");
         $st->execute([$this->bot['id'], $catId]);
-        $cat = $pdo->prepare("SELECT name, emoji FROM categories WHERE id=?");
+        $cat = $pdo->prepare("SELECT name, emoji, image_url FROM categories WHERE id=?");
         $cat->execute([$catId]);
         $catRow = $cat->fetch();
         $catName = $catRow['name'] ?? 'Category';
         $catEmoji = $catRow['emoji'] ?? '📁';
+        $catImg = trim((string)($catRow['image_url'] ?? ''));
         $txt = "📂 📦 " . $catEmoji . " " . esc($catName) . "\n——————————\nPage {$page}/{$pages} 🎉\n";
         $rows = [];
         $i = 0;
@@ -937,7 +974,12 @@ class Bot {
         if ($page < $pages) $nav[] = btn('Next ➡️', 'cat:' . $catId . ':' . ($page + 1), 'success');
         if ($nav) $rows[] = $nav;
         $rows[] = [btn($this->i->t('btn_back'), 'm:shop', 'primary')];
-        $edit($txt, inline_kb($rows));
+        // A category with its own image shows that image, not the welcome
+        // banner GIF (the banner is only the fallback when no image is set).
+        if ($catImg !== '') { $this->showPhotoScreen($catImg, $txt, inline_kb($rows)); return; }
+        // Long list: send fresh at the bottom so the client auto-scrolls
+        // to it (editing in place leaves the bottom buttons below the fold).
+        $this->showTracked($txt, inline_kb($rows));
     }
 
     private function product(int $id): ?array {
@@ -964,6 +1006,10 @@ class Bot {
             [btn('🔢 Buy Multiple', 'buym:' . $p['id'], 'primary'), btn('⭐ View Reviews', 'rev:' . $p['id'], 'success')],
             [btn_url('📤 Share', $shareUrl, 'success'), btn($this->i->t('btn_back'), 'm:shop', 'primary')],
         ]);
+        // A product with its own image shows that image, not the welcome
+        // banner GIF (the banner is only the fallback when no image is set).
+        $img = trim((string)($p['image_url'] ?? ''));
+        if ($img !== '') { $this->showPhotoScreen($img, $txt, $kb); return; }
         $edit($txt, $kb);
     }
 
@@ -1529,7 +1575,9 @@ class Bot {
         if ($page < $pages) $pg[] = btn('Next ➡️', 'pg:' . $filter . ':' . ($page + 1), 'success');
         if ($pg) $rows[] = $pg;
         $rows[] = [btn($this->i->t('btn_back'), 'm:home', 'primary')];
-        $edit($txt, inline_kb($rows));
+        // Long list: send fresh at the bottom so the client auto-scrolls
+        // to it (editing in place leaves the bottom buttons below the fold).
+        $this->showTracked($txt, inline_kb($rows));
     }
 
     private function showOrdersCb(callable $edit, string $filter, int $page): void {
