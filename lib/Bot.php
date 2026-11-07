@@ -1003,7 +1003,8 @@ class Bot {
     }
 
     private function product(int $id): ?array {
-        $st = db()->prepare("SELECT p.*, (SELECT COUNT(*) FROM stock_items s WHERE s.product_id=p.id AND s.status='available') stock
+        $st = db()->prepare("SELECT p.*, (SELECT COUNT(*) FROM stock_items s WHERE s.product_id=p.id AND s.status='available') stock,
+            (SELECT c.image_url FROM categories c WHERE c.id=p.category_id) AS cat_image_url
             FROM products p WHERE p.id=? AND p.bot_id=?");
         $st->execute([$id, $this->bot['id']]);
         return $st->fetch() ?: null;
@@ -1026,9 +1027,12 @@ class Bot {
             [btn('🔢 Buy Multiple', 'buym:' . $p['id'], 'primary'), btn('⭐ View Reviews', 'rev:' . $p['id'], 'success')],
             [btn_url('📤 Share', $shareUrl, 'success'), btn($this->i->t('btn_back'), 'm:shop', 'primary')],
         ]);
-        // A product with its own image shows that image, not the welcome
-        // banner GIF (the banner is only the fallback when no image is set).
+        // A product with its own image shows that image; otherwise it
+        // falls back to its category's image, so a product never shows the
+        // welcome banner when its category has a logo. Only when neither
+        // has an image does the banner stay (the edit-in-place fallback).
         $img = trim((string)($p['image_url'] ?? ''));
+        if ($img === '') $img = trim((string)($p['cat_image_url'] ?? ''));
         if ($img !== '') { $this->showPhotoScreen($img, $txt, $kb); return; }
         $edit($txt, $kb);
     }
