@@ -628,15 +628,46 @@ class Bot {
     }
 
     private function showDepositMethods(float $usd, $edit = null): void {
-        $kb = inline_kb([
-            [btn('Binance Auto Pay', 'dp:binance:' . $usd, 'primary'), btn('USDT (BEP20)', 'dp:bep20:' . $usd, 'success')],
-            [btn('USDT (Solana)', 'dp:sol:' . $usd, 'primary'), btn('USDT (TON)', 'dp:ton:' . $usd, 'success')],
-            [btn('⭐ Telegram Stars', 'dp:stars:' . $usd, 'primary')],
-            [btn($this->i->t('btn_back'), 'm:points', 'primary')],
-        ]);
+        $labels = [
+            'binance' => ['Binance Auto Pay', 'primary'],
+            'bep20' => ['USDT (BEP20)', 'success'],
+            'sol' => ['USDT (Solana)', 'primary'],
+            'ton' => ['USDT (TON)', 'success'],
+            'stars' => ['⭐ Telegram Stars', 'primary'],
+        ];
+        $rows = [];
+        $pair = [];
+        foreach ($this->activePaymentMethods() as $code) {
+            if (!isset($labels[$code])) continue;
+            [$label, $style] = $labels[$code];
+            $pair[] = btn($label, 'dp:' . $code . ':' . $usd, $style);
+            if (count($pair) === 2) { $rows[] = $pair; $pair = []; }
+        }
+        if ($pair) $rows[] = $pair;
+        if (!$rows) {
+            $msg = '❌ No payment methods are available right now. Please contact the store admin.';
+            if ($edit) $edit($msg, $this->backHomeKb());
+            else $this->showTracked($msg, $this->backHomeKb());
+            return;
+        }
+        $rows[] = [btn($this->i->t('btn_back'), 'm:points', 'primary')];
+        $kb = inline_kb($rows);
         $txt = "💰 Deposit \${$usd} (" . fmt_points(points_for($this->bot['id'], $usd)) . " points)\n\nSelect payment method:";
         if ($edit) $edit($txt, $kb);
         else $this->showTracked($txt, $kb);
+    }
+
+    // Active payment methods for this bot, in sort order. The admin
+    // panel toggles payment_methods.active — a method turned off there
+    // must not appear in the bot. Returns e.g. ['points','binance','stars'].
+    private function activePaymentMethods(): array {
+        $st = db()->prepare("SELECT code FROM payment_methods WHERE bot_id=? AND active=1 ORDER BY sort ASC");
+        $st->execute([$this->bot['id']]);
+        return array_values(array_filter(array_map('strval', $st->fetchAll(PDO::FETCH_COLUMN))));
+    }
+
+    private function paymentMethodActive(string $code): bool {
+        return in_array($code, $this->activePaymentMethods(), true);
     }
 
     private function paymentDetails(string $method): array {
@@ -1159,13 +1190,37 @@ class Bot {
             'product' => esc($p['name']), 'qty' => $qty,
             'total' => fmt_usd($total), 'pkr' => pkr_of($this->bot['id'], $total),
         ]);
-        $kb = inline_kb([
-            [btn('💎 Pay with Points (Wallet)', 'cf:' . $pid . ':' . $qty . ':points', 'primary')],
-            [btn('🟡 Binance Auto Pay', 'cf:' . $pid . ':' . $qty . ':binance', 'success')],
-            [btn('💰 USDT (BEP20)', 'cf:' . $pid . ':' . $qty . ':bep20', 'primary'), btn('💰 USDT (Solana)', 'cf:' . $pid . ':' . $qty . ':sol', 'success')],
-            [btn('💰 USDT (TON)', 'cf:' . $pid . ':' . $qty . ':ton', 'primary'), btn('⭐ Telegram Stars', 'cf:' . $pid . ':' . $qty . ':stars', 'success')],
-            [btn($this->i->t('btn_back'), 'p:' . $pid, 'primary')],
-        ]);
+        $labels = [
+            'points' => ['💎 Pay with Points (Wallet)', 'primary', true],
+            'binance' => ['🟡 Binance Auto Pay', 'success', true],
+            'bep20' => ['💰 USDT (BEP20)', 'primary', false],
+            'sol' => ['💰 USDT (Solana)', 'success', false],
+            'ton' => ['💰 USDT (TON)', 'primary', false],
+            'stars' => ['⭐ Telegram Stars', 'success', false],
+        ];
+        $rows = [];
+        $half = [];
+        foreach ($this->activePaymentMethods() as $code) {
+            if (!isset($labels[$code])) continue;
+            [$label, $style, $full] = $labels[$code];
+            $b = btn($label, 'cf:' . $pid . ':' . $qty . ':' . $code, $style);
+            if ($full) {
+                if ($half) { $rows[] = $half; $half = []; }
+                $rows[] = [$b];
+            } else {
+                $half[] = $b;
+                if (count($half) === 2) { $rows[] = $half; $half = []; }
+            }
+        }
+        if ($half) $rows[] = $half;
+        if (!$rows) {
+            $msg = '❌ No payment methods are available right now. Please contact the store admin.';
+            if ($edit) $edit($msg, $this->backHomeKb());
+            else $this->showTracked($msg, $this->backHomeKb());
+            return;
+        }
+        $rows[] = [btn($this->i->t('btn_back'), 'p:' . $pid, 'primary')];
+        $kb = inline_kb($rows);
         if ($edit) $edit($txt, $kb);
         else $this->showTracked($txt, $kb);
     }
@@ -1173,6 +1228,7 @@ class Bot {
     private function confirmPurchase(callable $edit, int $pid, int $qty, string $method): void {
         $p = $this->product($pid);
         if (!$p) { $edit('❌ Product not found.', $this->backHomeKb()); return; }
+        if (!$this->paymentMethodActive($method)) { $edit('❌ This payment method is not available right now. Please choose another method.', $this->backHomeKb()); return; }
         $total = (float)$p['price_usd'] * $qty;
         $stock = (int)$p['stock'];
         if ($p['status'] === 'out_of_stock' || $stock < $qty) {
@@ -1326,6 +1382,7 @@ class Bot {
     }
 
     private function startDeposit(callable $edit, string $method, float $usd): void {
+        if (!$this->paymentMethodActive($method)) { $edit('❌ This payment method is not available right now. Please choose another method.', $this->backHomeKb()); return; }
         $points = points_for($this->bot['id'], $usd);
         $pdo = db();
         $pdo->prepare("INSERT INTO deposits (bot_id, user_id, amount_usd, points, method, status) VALUES (?,?,?,?,?, 'pending')")
