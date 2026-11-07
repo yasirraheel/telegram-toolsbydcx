@@ -5,6 +5,40 @@
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = post_str('action');
+    if ($action === 'install_logos') {
+        // High-res logos: decode the bundled 512px PNGs (db/category_logos_512.php)
+        // into public/assets/logos/ and point each category at its local file.
+        // No hosting panel or file upload needed.
+        $seedFile = __DIR__ . '/../../../db/category_logos_512.php';
+        if (!is_file($seedFile)) {
+            flash('Logo file db/category_logos_512.php not found. Pull the latest code first.', 'err');
+            redirect('index.php?page=maintenance');
+        }
+        $logos = require $seedFile;
+        $dir = __DIR__ . '/../../assets/logos';
+        if (!is_dir($dir)) mkdir($dir, 0755, true);
+        // Block directory listing but keep the individual files reachable.
+        $idx = $dir . '/index.php';
+        if (!is_file($idx)) file_put_contents($idx, "<?php http_response_code(403); exit('Forbidden');
+");
+        $base = rtrim((string)($config['base_url'] ?? ''), '/');
+        $st = $pdo->prepare("UPDATE categories SET image_url=? WHERE id=? AND bot_id=?");
+        $wrote = 0; $updated = 0; $errs = [];
+        foreach ($logos as $cid => $b64) {
+            $bin = base64_decode((string)$b64, true);
+            if ($bin === false) { $errs[] = "category {$cid}: bad image data"; continue; }
+            $file = $dir . '/cat_' . (int)$cid . '.png';
+            if (file_put_contents($file, $bin) === false) { $errs[] = "category {$cid}: could not write file"; continue; }
+            $wrote++;
+            try {
+                $st->execute([$base . '/assets/logos/cat_' . (int)$cid . '.png', (int)$cid, $botId]);
+                $updated += (int)$st->rowCount();
+            } catch (PDOException $e) { $errs[] = "category {$cid}: " . $e->getMessage(); }
+        }
+        $msg = "High-res logos installed: {$wrote} file(s) written, {$updated} categor(ies) updated.";
+        if ($errs) flash($msg . ' Errors: ' . implode(' | ', $errs), 'err');
+        else flash($msg);
+    }
     if ($action === 'run_images') {
         $done = [];
         $errors = [];
@@ -144,5 +178,12 @@ admin_head('Maintenance', 'maintenance', $botId, $bots);
 <button type="submit">▶️ Run image migration (add column + set 71 category logos)</button>
 </form>
 <p class="mut">Safe to press again — it only adds the column if it is missing and re-sets the same logos. After it runs, open any category in the bot and its own logo will show instead of the welcome banner.</p>
+<hr>
+<h3 style="margin-top:16px">🖼️ High-resolution logos (512px)</h3>
+<p class="mut">The Google favicon logos are only 128px, so they look blurry when Telegram shows them big. This installs sharp 512px brand logos (made from Simple Icons) for the categories that have one, and points each category at its own local file. Categories with no brand logo keep their current image.</p>
+<form method="post"><input type="hidden" name="action" value="install_logos"><?= csrf_field() ?>
+<button type="submit">▶️ Install high-res logos (512px, local files)</button>
+</form>
+<p class="mut">After it runs, open any category in the bot — the logo will be sharp, not pixelated. A product without its own image shows its category's logo.</p>
 </div>
 <?php admin_foot(); ?>
