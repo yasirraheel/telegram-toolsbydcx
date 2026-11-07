@@ -54,6 +54,37 @@ function post_int(string $k, int $def = 0): int { return (int)($_POST[$k] ?? $de
 function get_int(string $k, int $def = 0): int { return (int)($_GET[$k] ?? $def); }
 function post_float(string $k, float $def = 0.0): float { return (float)($_POST[$k] ?? $def); }
 
+// ---- Image upload (categories / products) ----
+// Accepts an uploaded image file and stores it under public/assets/uploads/,
+// returning its full public URL (base_url + path) for the image_url column.
+// Returns null when no file was uploaded. Returns '' on a rejected file
+// (caller should flash an error). Only jpg/jpeg/png/gif/webp, max 5 MB.
+// The filename is generated (never the user-supplied name) to avoid path
+// traversal. The uploads dir is created on first use when writable.
+function handle_image_upload(string $field, string $prefix): ?string {
+    if (empty($_FILES[$field]) || !is_array($_FILES[$field])) return null;
+    $f = $_FILES[$field];
+    if (($f['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) return null;
+    if (($f['error'] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK) return '';
+    if (($f['size'] ?? 0) > 5 * 1024 * 1024) return '';
+    $ext = strtolower(pathinfo((string)($f['name'] ?? ''), PATHINFO_EXTENSION));
+    $allowed = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'gif' => 'image/gif', 'webp' => 'image/webp'];
+    if (!isset($allowed[$ext])) return '';
+    $mime = '';
+    if (function_exists('mime_content_type') && is_file((string)($f['tmp_name'] ?? ''))) {
+        $mime = (string)mime_content_type((string)$f['tmp_name']);
+    }
+    if ($mime !== '' && $mime !== $allowed[$ext]) return '';
+    $dir = __DIR__ . '/../assets/uploads';
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true)) return '';
+    $name = $prefix . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+    $dest = $dir . '/' . $name;
+    if (!@move_uploaded_file((string)$f['tmp_name'], $dest)) return '';
+    $cfg = load_config();
+    $base = rtrim((string)($cfg['base_url'] ?? ''), '/');
+    return $base . '/assets/uploads/' . $name;
+}
+
 function slugify(string $s): string {
     $s = strtolower(trim($s));
     $s = preg_replace('/[^a-z0-9]+/', '-', $s);

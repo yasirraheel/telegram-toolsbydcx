@@ -10,6 +10,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $price = post_float('price_usd');
         $desc = post_str('description');
         $img = post_str('image_url');
+        $up = handle_image_upload('image_file', 'prod');
+        if ($up === '') { flash('Image upload failed: use a JPG, PNG, GIF or WebP under 5 MB.', 'err'); }
+        elseif ($up !== null) { $img = $up; }
         $format = post_str('delivery_format') ?: 'Coupon / Redemption Code';
         $status = post_str('status') === 'out_of_stock' ? 'out_of_stock' : 'active';
         $sort = post_int('sort');
@@ -58,7 +61,7 @@ admin_head('Products', 'products', $botId, $bots);
 ?>
 <div class="card"><h3 style="margin-top:0"><?= $edit ? '✏️ Edit product' : '➕ Add product' ?></h3>
 <?php if (!$cats): ?><p class="mut">Add a category first.</p><?php else: ?>
-<form method="post"><input type="hidden" name="action" value="save"><?= csrf_field() ?>
+<form method="post" enctype="multipart/form-data"><input type="hidden" name="action" value="save"><?= csrf_field() ?>
 <input type="hidden" name="id" value="<?= (int)($edit['id'] ?? 0) ?>">
 <div class="row">
 <div style="flex:2"><label>Name</label><input type="text" name="name" value="<?= esc($edit['name'] ?? '') ?>" required></div>
@@ -69,7 +72,9 @@ admin_head('Products', 'products', $botId, $bots);
 <div style="width:110px"><label>Sort</label><input type="number" name="sort" value="<?= (int)($edit['sort'] ?? 0) ?>"></div>
 </div>
 <label>Description</label><textarea name="description"><?= esc($edit['description'] ?? '') ?></textarea>
-<label>Image URL (shown as the product photo in the bot; leave empty to keep the welcome banner)</label><input type="url" name="image_url" value="<?= esc($edit['image_url'] ?? '') ?>" placeholder="https://...">
+<label>Image — upload a file (JPG, PNG, GIF or WebP, max 5 MB)</label><input type="file" name="image_file" accept="image/*">
+<?php if (!empty($edit['image_url'])): ?><p class="mut" style="margin:4px 0">Current: <a href="<?= esc($edit['image_url']) ?>" target="_blank" rel="noopener"><?= esc($edit['image_url']) ?></a></p><?php endif; ?>
+<label>…or paste an Image URL (used only when no file is uploaded)</label><input type="url" name="image_url" value="<?= esc($edit['image_url'] ?? '') ?>" placeholder="https://...">
 <div class="row">
 <div style="flex:1"><label>Delivery format</label><input type="text" name="delivery_format" value="<?= esc($edit['delivery_format'] ?? 'Coupon / Redemption Code') ?>"></div>
 <div><label>Status</label><select name="status"><option value="active" <?= ($edit['status'] ?? 'active') === 'active' ? 'selected' : '' ?>>active</option><option value="out_of_stock" <?= ($edit['status'] ?? '') === 'out_of_stock' ? 'selected' : '' ?>>out_of_stock</option></select></div>

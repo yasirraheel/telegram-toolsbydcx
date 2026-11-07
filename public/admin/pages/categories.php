@@ -9,6 +9,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $slug = slugify(post_str('slug') ?: $name);
         $emoji = post_str('emoji') ?: '📁';
         $img = post_str('image_url');
+        $up = handle_image_upload('image_file', 'cat');
+        if ($up === '') { flash('Image upload failed: use a JPG, PNG, GIF or WebP under 5 MB.', 'err'); }
+        elseif ($up !== null) { $img = $up; }
         $sort = post_int('sort');
         $active = post_int('active', 1) ? 1 : 0;
         if ($name === '') { flash('Name is required.', 'err'); }
@@ -44,7 +47,7 @@ $rows = $rows->fetchAll();
 admin_head('Categories', 'categories', $botId, $bots);
 ?>
 <div class="card"><h3 style="margin-top:0"><?= $edit ? '✏️ Edit category' : '➕ Add category' ?></h3>
-<form method="post"><input type="hidden" name="action" value="save"><?= csrf_field() ?>
+<form method="post" enctype="multipart/form-data"><input type="hidden" name="action" value="save"><?= csrf_field() ?>
 <input type="hidden" name="id" value="<?= (int)($edit['id'] ?? 0) ?>">
 <div class="row">
 <div style="flex:2"><label>Name</label><input type="text" name="name" value="<?= esc($edit['name'] ?? '') ?>" required></div>
@@ -53,7 +56,9 @@ admin_head('Categories', 'categories', $botId, $bots);
 <div style="width:90px"><label>Sort</label><input type="number" name="sort" value="<?= (int)($edit['sort'] ?? 0) ?>"></div>
 <div><label>Active</label><select name="active"><option value="1" <?= ($edit['active'] ?? 1) ? 'selected' : '' ?>>Yes</option><option value="0" <?= isset($edit) && !$edit['active'] ? 'selected' : '' ?>>No</option></select></div>
 </div>
-<label>Image URL (shown as the category photo in the bot; leave empty to keep the welcome banner)</label><input type="url" name="image_url" value="<?= esc($edit['image_url'] ?? '') ?>" placeholder="https://...">
+<label>Image — upload a file (JPG, PNG, GIF or WebP, max 5 MB)</label><input type="file" name="image_file" accept="image/*">
+<?php if (!empty($edit['image_url'])): ?><p class="mut" style="margin:4px 0">Current: <a href="<?= esc($edit['image_url']) ?>" target="_blank" rel="noopener"><?= esc($edit['image_url']) ?></a></p><?php endif; ?>
+<label>…or paste an Image URL (used only when no file is uploaded)</label><input type="url" name="image_url" value="<?= esc($edit['image_url'] ?? '') ?>" placeholder="https://...">
 <button type="submit" style="margin-top:12px"><?= $edit ? 'Save changes' : 'Add category' ?></button>
 <?php if ($edit): ?><a class="btn btn2" href="index.php?page=categories">Cancel</a><?php endif; ?></form></div>
 
