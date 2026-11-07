@@ -721,52 +721,57 @@ class Bot {
     // the user's orders, so the header never lies when a filter is on.
     // Spent counts only delivered orders — a pending or cancelled order is
     // not money spent.
-    private function ordersScreen(string $filter, int $page): array {
+    // Orders screen. The per-status counts live INSIDE the filter buttons
+    // (e.g. "✅ Delivered (3)"), and the order list only appears after the
+    // user taps a filter — the first view shows just the stats + filters,
+    // never the whole list at once.
+    private function ordersScreen(string $filter, int $page, bool $showList): array {
         $pdo = db();
         $stats = $pdo->prepare("SELECT COUNT(*) total, COALESCE(SUM(CASE WHEN status='delivered' THEN total_usd ELSE 0 END),0) spent, COALESCE(SUM(status='delivered'),0) delivered, COALESCE(SUM(status='pending'),0) pending, COALESCE(SUM(status='refunded'),0) refunded, COALESCE(SUM(status='cancelled'),0) cancelled FROM orders WHERE bot_id=? AND user_id=?");
         $stats->execute([$this->bot['id'], $this->user['id']]);
         $s = $stats->fetch();
         $filterLabel = $filter === 'all' ? 'All' : ucfirst($filter);
         $txt = "🧾 My Orders — {$filterLabel}\n\n"
-            . "Total: " . (int)$s['total'] . " orders · $" . fmt_usd($s['spent']) . " spent\n"
-            . "✅ Delivered: " . (int)$s['delivered'] . " · ⏳ Pending: " . (int)$s['pending'] . "\n"
-            . "↩️ Refunded: " . (int)$s['refunded'] . " · ❌ Cancelled: " . (int)$s['cancelled'];
-        $where = "o.bot_id=? AND o.user_id=?";
-        $params = [$this->bot['id'], $this->user['id']];
-        if ($filter !== 'all') { $where .= " AND o.status=?"; $params[] = $filter; }
-        $perPage = 8;
-        $off = ($page - 1) * $perPage;
-        $cnt = $pdo->prepare("SELECT COUNT(*) FROM orders o WHERE $where");
-        $cnt->execute($params);
-        $totalRows = (int)$cnt->fetchColumn();
-        $pages = max(1, (int)ceil($totalRows / $perPage));
-        if ($page > $pages) $page = $pages;
-        $off = ($page - 1) * $perPage;
-        $st = $pdo->prepare("SELECT o.*, p.name pname FROM orders o JOIN products p ON p.id=o.product_id WHERE $where ORDER BY o.created_at DESC LIMIT $perPage OFFSET $off");
-        $st->execute($params);
-        $rows = $st->fetchAll();
+            . "Total: " . (int)$s['total'] . " orders · $" . fmt_usd($s['spent']) . " spent";
         $kbRows = [];
-        if (!$rows) {
-            $txt .= "\n\nNo orders in this filter yet.";
-        } else {
-            $txt .= "\n\nTap an order to see its details and actions:";
-            foreach ($rows as $o) {
-                $label = '#' . $o['id'] . ' · ' . mb_substr((string)$o['pname'], 0, 24) . ' · $' . fmt_usd($o['total_usd']);
-                $kbRows[] = [btn($label, 'o:' . (int)$o['id'], 'primary')];
+        if ($showList) {
+            $where = "o.bot_id=? AND o.user_id=?";
+            $params = [$this->bot['id'], $this->user['id']];
+            if ($filter !== 'all') { $where .= " AND o.status=?"; $params[] = $filter; }
+            $perPage = 8;
+            $cnt = $pdo->prepare("SELECT COUNT(*) FROM orders o WHERE $where");
+            $cnt->execute($params);
+            $totalRows = (int)$cnt->fetchColumn();
+            $pages = max(1, (int)ceil($totalRows / $perPage));
+            if ($page > $pages) $page = $pages;
+            $off = ($page - 1) * $perPage;
+            $st = $pdo->prepare("SELECT o.*, p.name pname FROM orders o JOIN products p ON p.id=o.product_id WHERE $where ORDER BY o.created_at DESC LIMIT $perPage OFFSET $off");
+            $st->execute($params);
+            $rows = $st->fetchAll();
+            if (!$rows) {
+                $txt .= "\n\nNo orders in this filter yet.";
+            } else {
+                $txt .= "\n\nTap an order to see its details and actions:";
+                foreach ($rows as $o) {
+                    $label = '#' . $o['id'] . ' · ' . mb_substr((string)$o['pname'], 0, 24) . ' · $' . fmt_usd($o['total_usd']);
+                    $kbRows[] = [btn($label, 'o:' . (int)$o['id'], 'primary')];
+                }
             }
+            $nav = [];
+            if ($page > 1) $nav[] = btn('⬅️ Prev', 'ord:' . $filter . ':' . ($page - 1), 'primary');
+            if ($page < $pages) $nav[] = btn('Next ➡️', 'ord:' . $filter . ':' . ($page + 1), 'primary');
+            if ($nav) $kbRows[] = $nav;
+        } else {
+            $txt .= "\n\nTap a filter to see its orders.";
         }
-        $kbRows[] = [btn('✅ Delivered', 'ord:delivered:1', 'primary'), btn('⏳ Pending', 'ord:pending:1', 'success')];
-        $kbRows[] = [btn('↩️ Refunded', 'ord:refunded:1', 'primary'), btn('❌ Cancelled', 'ord:cancelled:1', 'success')];
-        $nav = [];
-        if ($page > 1) $nav[] = btn('⬅️ Prev', 'ord:' . $filter . ':' . ($page - 1), 'primary');
-        if ($page < $pages) $nav[] = btn('Next ➡️', 'ord:' . $filter . ':' . ($page + 1), 'primary');
-        if ($nav) $kbRows[] = $nav;
-        $kbRows[] = [btn('📋 All', 'ord:all:1', 'primary'), btn($this->i->t('btn_back'), 'm:home', 'primary')];
+        $kbRows[] = [btn('✅ Delivered (' . (int)$s['delivered'] . ')', 'ord:delivered:1', 'primary'), btn('⏳ Pending (' . (int)$s['pending'] . ')', 'ord:pending:1', 'success')];
+        $kbRows[] = [btn('↩️ Refunded (' . (int)$s['refunded'] . ')', 'ord:refunded:1', 'primary'), btn('❌ Cancelled (' . (int)$s['cancelled'] . ')', 'ord:cancelled:1', 'success')];
+        $kbRows[] = [btn('📋 All (' . (int)$s['total'] . ')', 'ord:all:1', 'primary'), btn($this->i->t('btn_back'), 'm:home', 'primary')];
         return [$txt, inline_kb($kbRows)];
     }
 
     private function showOrders(string $filter, int $page): void {
-        [$txt, $kb] = $this->ordersScreen($filter, $page);
+        [$txt, $kb] = $this->ordersScreen($filter, $page, false);
         $this->showTracked($txt, $kb);
     }
 
@@ -1645,7 +1650,7 @@ class Bot {
     }
 
     private function showOrdersCb(callable $edit, string $filter, int $page): void {
-        [$txt, $kb] = $this->ordersScreen($filter, $page);
+        [$txt, $kb] = $this->ordersScreen($filter, $page, true);
         $edit($txt, $kb);
     }
 
