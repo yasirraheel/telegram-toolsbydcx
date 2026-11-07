@@ -517,6 +517,48 @@ class Bot {
             tg_send($this->token, $this->chatId, '⭐ Thank you! Your review was submitted for moderation.');
             return true;
         }
+        if (str_starts_with($state, 'await_binance_order:')) {
+            // Typed: await_binance_order:o:<order id> or await_binance_order:d:<deposit id>.
+            // The user pasted the Order ID Binance showed them after paying.
+            $p = explode(':', $state);
+            $type = $p[1] ?? 'o';
+            $oid = (int)($p[2] ?? 0);
+            $orderId = trim($text);
+            $table = $type === 'd' ? 'deposits' : 'orders';
+            $st = db()->prepare("SELECT * FROM $table WHERE id=? AND bot_id=? AND user_id=?");
+            $st->execute([$oid, $this->bot['id'], $this->user['id']]);
+            $o = $st->fetch();
+            if (!$o) { $this->setState(''); tg_send($this->token, $this->chatId, '❌ Payment reference not found.'); return true; }
+            $details = $this->paymentDetails('binance');
+            $createdMs = strtotime((string)$o['created_at']) * 1000;
+            $startMs = max(0, $createdMs - 120000);
+            $endMs = min((int)round(microtime(true) * 1000), $createdMs + (30 * 60 * 1000));
+            $expectedAmount = (float)($type === 'd' ? $o['amount_usd'] : $o['total_usd']);
+            $currency = strtoupper(trim((string)($details['currency'] ?? 'USDT')));
+            $usedSt = db()->prepare("SELECT txid FROM orders WHERE bot_id=? AND txid<>'' UNION ALL SELECT txid FROM deposits WHERE bot_id=? AND txid<>''");
+            $usedSt->execute([$this->bot['id'], $this->bot['id']]);
+            $usedTxids = array_values(array_filter(array_map('strval', $usedSt->fetchAll(PDO::FETCH_COLUMN))));
+            $res = BinancePay::findPaymentByOrderId($details, $orderId, $expectedAmount, $currency, $startMs, $endMs, $usedTxids);
+            $this->setState('');
+            if (!($res['ok'] ?? false)) {
+                tg_send($this->token, $this->chatId, '⏳ Binance Pay verification is temporarily unavailable. Please try Check Payment again shortly.');
+                return true;
+            }
+            if (!($res['found'] ?? false)) {
+                tg_send($this->token, $this->chatId, '❌ No Binance Pay payment found for Order ID ' . esc($orderId) . ' with the expected amount. Check that you copied the Order ID Binance showed after paying, and that the payment was sent to the right Binance Pay UID.');
+                return true;
+            }
+            $transaction = is_array($res['transaction'] ?? null) ? $res['transaction'] : [];
+            $txid = trim((string)($transaction['transactionId'] ?? $transaction['orderId'] ?? ''));
+            if ($type === 'd') {
+                $this->confirmBinanceDeposit($oid, $txid);
+            } else {
+                $p = $this->product((int)$o['product_id']);
+                if (!$p) { tg_send($this->token, $this->chatId, '❌ Product no longer exists. Contact support with this order number.'); return true; }
+                $this->fulfillExistingOrder($oid, $p, (int)$o['qty'], $txid);
+            }
+            return true;
+        }
         if (str_starts_with($state, 'await_txid:')) {
             // Typed: await_txid:o:<order id> or await_txid:d:<deposit id>.
             $p = explode(':', $state);
@@ -1392,6 +1434,7 @@ class Bot {
     }
 
     private function checkPayment(callable $edit, string $type, int $refId): void {
+        if (($this->user['state'] ?? '') === 'await_binance_order:' . $type . ':' . $refId) $this->setState('');
         $pdo = db();
         $table = $type === 'd' ? 'deposits' : 'orders';
         $st = $pdo->prepare("SELECT * FROM $table WHERE id=? AND bot_id=? AND user_id=?");
@@ -1419,7 +1462,12 @@ class Bot {
                 return;
             }
             if (!($res['found'] ?? false)) {
-                $edit('⏳ Matching Binance Pay transaction not found yet. Complete the payment in Binance, wait a few seconds, then tap Check Payment again.', $this->checkPaymentKb($type, $refId));
+                // No match by amount yet. Let the user paste the Order ID
+                // Binance showed them after paying (a Binance Pay transfer
+                // to a UID has an Order ID, not a blockchain TXID) — the
+                // bot will verify that exact Order ID instead.
+                $this->setState('await_binance_order:' . $type . ':' . $refId);
+                $edit('⏳ Matching Binance Pay transaction not found yet. Complete the payment in Binance, wait a few seconds, then tap Check Payment again.\n\nOr paste the Order ID Binance showed you after paying (find it in your Binance app under Pay history) and the bot will verify that exact Order ID.', $this->checkPaymentKb($type, $refId));
                 return;
             }
             $transaction = is_array($res['transaction'] ?? null) ? $res['transaction'] : [];

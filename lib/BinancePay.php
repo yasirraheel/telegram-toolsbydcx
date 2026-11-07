@@ -167,6 +167,44 @@ final class BinancePay {
         return ['ok' => true, 'found' => false];
     }
 
+    // Verify one specific Binance Pay payment by the Order ID Binance
+    // shows the sender after paying (there is no blockchain TXID for a
+    // Binance Pay transfer to a UID — the Order ID is the identifier).
+    // The pasted id is matched against the row's orderId OR transactionId
+    // (tolerant fallback: some rows only carry one of them), and the same
+    // checks as the automatic match still apply — currency, exact amount,
+    // receiver UID, time window, order type, and not already used. A
+    // worthless token can never match: its currency is not USDT.
+    public static function findPaymentByOrderId(array $details, string $orderId, float $amount, string $currency, int $startMs, int $endMs, array $excludeTxids = []): array {
+        $uid = trim((string)($details['uid'] ?? ''));
+        if ($uid === '') return ['ok' => false, 'error' => 'Binance Pay UID is required for automatic verification.'];
+        $orderId = trim($orderId);
+        if ($orderId === '') return ['ok' => true, 'found' => false];
+        $res = self::payTransactions($details, $startMs, $endMs, 100);
+        if (!($res['ok'] ?? false)) return $res;
+        $currency = strtoupper(trim($currency));
+        foreach (($res['data'] ?? []) as $row) {
+            if (!is_array($row)) continue;
+            $rowOrderId = trim((string)($row['orderId'] ?? ''));
+            $rowTxId = trim((string)($row['transactionId'] ?? ''));
+            if ($rowOrderId !== $orderId && $rowTxId !== $orderId) continue;
+            $time = (int)($row['transactionTime'] ?? 0);
+            if ($time < 10000000000) $time *= 1000;
+            if ($time < $startMs || $time > $endMs) continue;
+            if (!in_array((string)($row['orderType'] ?? ''), ['C2C', 'PAY'], true)) continue;
+            if ((string)($row['receiverInfo']['binanceId'] ?? '') !== $uid) continue;
+            if (in_array($rowTxId, $excludeTxids, true)) continue;
+            foreach (self::paymentFunds($row) as $fund) {
+                if (strtoupper((string)($fund['currency'] ?? '')) !== $currency) continue;
+                if ((float)($fund['amount'] ?? 0) <= 0) continue;
+                if (abs((float)$fund['amount'] - $amount) <= 0.00000001) {
+                    return ['ok' => true, 'found' => true, 'transaction' => $row];
+                }
+            }
+        }
+        return ['ok' => true, 'found' => false];
+    }
+
     private static function paymentFunds(array $row): array {
         if (is_array($row['fundsDetail'] ?? null) && $row['fundsDetail']) return $row['fundsDetail'];
         return [[
